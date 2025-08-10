@@ -2,6 +2,7 @@ import subprocess
 import sys
 import os
 import time
+import shutil
 from datetime import datetime
 from seleniumwire import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -16,10 +17,36 @@ def log_with_timestamp(message):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {message}")
 
+def check_storage_space(min_gb=10):
+    """Check if there's enough free storage space (in GB)"""
+    try:
+        # Get disk usage statistics for current directory
+        total, used, free = shutil.disk_usage(".")
+        
+        # Convert bytes to GB
+        free_gb = free / (1024**3)
+        total_gb = total / (1024**3)
+        used_gb = used / (1024**3)
+        
+        log_with_timestamp(f"Storage info - Total: {total_gb:.1f}GB, Used: {used_gb:.1f}GB, Free: {free_gb:.1f}GB")
+        
+        if free_gb < min_gb:
+            log_with_timestamp(f"⚠️  Warning: Only {free_gb:.1f}GB free space remaining (minimum required: {min_gb}GB)")
+            log_with_timestamp("❌ Skipping download due to insufficient storage space")
+            return False
+        else:
+            log_with_timestamp(f"✓ Sufficient storage space available: {free_gb:.1f}GB free")
+            return True
+            
+    except Exception as e:
+        log_with_timestamp(f"Error checking storage space: {e}")
+        # Continue with download if we can't check storage
+        return True
+
 def get_login_credentials():
     """Get hardcoded login credentials"""
-    email = ""
-    password = ""
+    email = "acc@wnzke.de"
+    password = "6RS*WzjXQs8PRvL3RvrV**#l"
     log_with_timestamp(f"Using hardcoded credentials for: {email}")
     return email, password
 
@@ -63,13 +90,13 @@ def automated_login(driver, email, password):
                 csrf_token = csrf_token_element.get_attribute("value")
         
         if csrf_token:
-            print(f"Found CSRF token: {csrf_token[:20]}...")
+            log_with_timestamp(f"Found CSRF token: {csrf_token[:20]}...")
         else:
-            print("Could not find CSRF token")
+            log_with_timestamp("Could not find CSRF token")
             return False
         
         # Wait for form elements to be clickable
-        print("Waiting for form elements to be interactable...")
+        log_with_timestamp("Waiting for form elements to be interactable...")
         
         # Try different selectors for email field - including the main form selectors
         email_field = None
@@ -85,13 +112,13 @@ def automated_login(driver, email, password):
         for selector in email_selectors:
             try:
                 email_field = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-                print(f"Found email field with selector: {selector}")
+                log_with_timestamp(f"Found email field with selector: {selector}")
                 break
             except:
                 continue
         
         if not email_field:
-            print("Could not find email field")
+            log_with_timestamp("Could not find email field")
             return False
         
         # Try different selectors for password field
@@ -108,17 +135,17 @@ def automated_login(driver, email, password):
         for selector in password_selectors:
             try:
                 password_field = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-                print(f"Found password field with selector: {selector}")
+                log_with_timestamp(f"Found password field with selector: {selector}")
                 break
             except:
                 continue
         
         if not password_field:
-            print("Could not find password field")
+            log_with_timestamp("Could not find password field")
             return False
         
         # Clear and fill fields using JavaScript if normal method fails
-        print("Filling in credentials...")
+        log_with_timestamp("Filling in credentials...")
         try:
             email_field.clear()
             email_field.send_keys(email)
@@ -151,7 +178,7 @@ def automated_login(driver, email, password):
         for selector in submit_selectors:
             try:
                 submit_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-                print(f"Found submit button with selector: {selector}")
+                log_with_timestamp(f"Found submit button with selector: {selector}")
                 break
             except:
                 continue
@@ -161,32 +188,32 @@ def automated_login(driver, email, password):
             try:
                 form = driver.find_element(By.CSS_SELECTOR, "form.login_form, .accLoginDetails form")
                 form.submit()
-                print("Submitted form directly")
+                log_with_timestamp("Submitted form directly")
             except:
-                print("Could not find submit button or form")
+                log_with_timestamp("Could not find submit button or form")
                 return False
         else:
             # Click submit button using JavaScript to avoid interactability issues
             driver.execute_script("arguments[0].click();", submit_button)
-            print("Clicked submit button")
+            log_with_timestamp("Clicked submit button")
         
         # Wait for redirect/response
         time.sleep(8)  # Increased wait time
         
         # Check if login was successful by looking for certain indicators
         current_url = driver.current_url
-        print(f"After login redirect: {current_url}")
+        log_with_timestamp(f"After login redirect: {current_url}")
         
         # Get cookies after login
         cookies = driver.get_cookies()
-        print(f"Got {len(cookies)} cookies after login")
+        log_with_timestamp(f"Got {len(cookies)} cookies after login")
         
         # Check for expected authentication cookies
         auth_cookies = {}
         for cookie in cookies:
             if cookie['name'] in ['XSRF-TOKEN', 'shiny_bound_session', 'forever_cookie']:
                 auth_cookies[cookie['name']] = cookie['value']
-                print(f"  ✓ {cookie['name']}: {cookie['value'][:20]}...")
+                log_with_timestamp(f"  ✓ {cookie['name']}: {cookie['value'][:20]}...")
         
         # Also check if we're redirected away from login page
         login_success = False
@@ -244,13 +271,13 @@ def setup_browser_with_login(email, password):
     login_success = automated_login(driver, email, password)
     
     if not login_success:
-        print("Login failed. Please check your credentials.")
+        log_with_timestamp("Login failed. Please check your credentials.")
         driver.quit()
         return None, None
     
     # Build cookie string from logged-in session
     cookie = build_cookie_from_driver(driver)
-    print(f"Built cookie string with {len(cookie.split(';'))} components")
+    log_with_timestamp(f"Built cookie string with {len(cookie.split(';'))} components")
     
     return driver, cookie
 
@@ -269,7 +296,7 @@ def setup_browser(cookie):
     driver = webdriver.Chrome(service=service, options=chrome_options)
     
     # First visit the domain to set cookies properly
-    print("Setting up authentication cookies...")
+    log_with_timestamp("Setting up authentication cookies...")
     driver.get("https://shinybound.com")
     time.sleep(2)
     
@@ -299,15 +326,15 @@ def setup_browser(cookie):
                     pass  # Some domains might not work, that's okay
     
     # Refresh the page to ensure cookies are applied
-    print("Refreshing page with authentication cookies...")
+    log_with_timestamp("Refreshing page with authentication cookies...")
     driver.refresh()
     time.sleep(3)
     
     # Verify cookies were set
     current_cookies = driver.get_cookies()
-    print(f"Set {len(current_cookies)} cookies in browser")
+    log_with_timestamp(f"Set {len(current_cookies)} cookies in browser")
     for c in current_cookies:
-        print(f"  - {c['name']}: {c['value'][:20]}...")
+        log_with_timestamp(f"  - {c['name']}: {c['value'][:20]}...")
     
     return driver
 
@@ -346,7 +373,6 @@ def extract_mpd_url(driver, page_url):
             play_buttons = driver.find_elements(By.CSS_SELECTOR, 
                 "button[aria-label*='play'], .play-button, button.play, [class*='play'], iframe")
             if play_buttons:
-                print(f"Found {len(play_buttons)} potential play elements, trying to interact...")
                 for button in play_buttons[:3]:  # Try first 3 elements
                     try:
                         driver.execute_script("arguments[0].click();", button)
@@ -354,7 +380,7 @@ def extract_mpd_url(driver, page_url):
                     except:
                         pass
         except Exception as e:
-            print(f"Could not interact with play button: {e}")
+            pass
         
         # Wait and monitor for authenticated URLs
         log_with_timestamp("Waiting for video player to load and authenticate...")
@@ -362,21 +388,16 @@ def extract_mpd_url(driver, page_url):
         authenticated_url = None
         basic_url = None
         
-        # Monitor requests for up to 30 seconds
-        for i in range(6):  # 6 iterations of 5 seconds each = 30 seconds total
+        # Monitor requests for up to 5 seconds
+        for i in range(1):  # 1 iteration of 5 seconds each = 5 seconds total
             time.sleep(5)
-            log_with_timestamp(f"Checking requests... ({(i+1)*5}/30 seconds)")
+            log_with_timestamp(f"Checking requests... ({(i+1)*5}/5 seconds)")
             
             # Debug: Show all requests to cloudflare
-            print("DEBUG: All cloudflare requests found so far:")
             cloudflare_requests = []
             for request in driver.requests:
                 if request.url and 'customer-trb89iur2mnpci10.cloudflarestream.com' in request.url:
                     cloudflare_requests.append(request.url)
-                    print(f"  - {request.url}")
-            
-            if not cloudflare_requests:
-                print("  No cloudflare requests found yet")
             
             # Check all requests so far
             for request in driver.requests:
@@ -385,17 +406,14 @@ def extract_mpd_url(driver, page_url):
                     if '.eyJ' in request.url:  # JWT tokens have this pattern
                         authenticated_url = request.url
                         log_with_timestamp(f"✓ Found AUTHENTICATED manifest URL with JWT token!")
-                        print(f"URL: {request.url}")
                         return authenticated_url, video_title
                     elif 'customer-trb89iur2mnpci10.cloudflarestream.com/' in request.url and len(request.url) > 200:
                         # Long cloudflare URLs are likely authenticated
                         authenticated_url = request.url
                         log_with_timestamp(f"✓ Found LONG cloudflare manifest URL (likely authenticated)!")
-                        print(f"URL: {request.url}")
                         return authenticated_url, video_title
                     else:
                         basic_url = request.url
-                        log_with_timestamp(f"⚠ Found basic manifest URL: {request.url}")
             
             # If we found an authenticated URL, break early
             if authenticated_url:
@@ -406,55 +424,75 @@ def extract_mpd_url(driver, page_url):
         time.sleep(5)
         
         for request in driver.requests:
-            print(f"DEBUG: Checking URL: {request.url[:100] if request.url else 'None'}...")
             if request.url and 'customer-trb89iur2mnpci10.cloudflarestream.com/' in request.url:
                 if '/manifest/video.mpd' in request.url:
-                    print(f"✓ Found cloudflare manifest URL: {request.url}")
+                    log_with_timestamp(f"✓ Found cloudflare manifest URL")
                     return request.url, video_title
                 elif request.url.count('.') >= 2 and len(request.url) > 150:
                     # This might be an authenticated URL without explicit /manifest/video.mpd
                     potential_manifest = request.url
                     if not potential_manifest.endswith('/manifest/video.mpd'):
                         potential_manifest += '/manifest/video.mpd'
-                    print(f"✓ Found potential authenticated URL, trying with manifest path")
+                    log_with_timestamp(f"✓ Found potential authenticated URL, trying with manifest path")
                     return potential_manifest, video_title
         
         # Fall back to basic URL if we have one
         if basic_url:
-            print("Warning: Only found basic manifest URL, this may only download a preview")
+            log_with_timestamp("Warning: Only found basic manifest URL, this may only download a preview")
             return basic_url, video_title
         else:
-            print(f"No manifest URL found for {page_url}")
+            log_with_timestamp(f"No manifest URL found for {page_url}")
             return None, video_title
         
     except Exception as e:
-        print(f"Error extracting manifest URL: {e}")
+        log_with_timestamp(f"Error extracting manifest URL: {e}")
         return None, None
 
 def check_file_exists(video_title):
-    """Check if a file with the given title already exists in current directory or ./videos/"""
+    """Check if a file with the given title already exists in current directory or ./videos/ (case-insensitive)"""
     if not video_title:
         return False
     
     # Common video file extensions
     video_extensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v']
     
+    # Normalize video title for comparison (lowercase)
+    video_title_lower = video_title.lower()
+    
     # Check in current directory
-    for ext in video_extensions:
-        filename = f"{video_title}{ext}"
-        if os.path.exists(filename):
-            log_with_timestamp(f"File already exists in current directory: {filename}")
-            return True
+    try:
+        current_files = os.listdir(".")
+        for file in current_files:
+            if os.path.isfile(file):
+                # Check if file matches any video extension
+                for ext in video_extensions:
+                    if file.lower().endswith(ext.lower()):
+                        # Extract filename without extension and compare case-insensitively
+                        file_title = os.path.splitext(file)[0].lower()
+                        if file_title == video_title_lower:
+                            log_with_timestamp(f"File already exists in current directory: {file}")
+                            return True
+    except OSError:
+        log_with_timestamp("Could not list files in current directory")
     
     # Check in ./videos/ directory
     videos_dir = "./videos"
-    if os.path.exists(videos_dir):
-        for ext in video_extensions:
-            filename = f"{video_title}{ext}"
-            filepath = os.path.join(videos_dir, filename)
-            if os.path.exists(filepath):
-                log_with_timestamp(f"File already exists in videos directory: {filepath}")
-                return True
+    if os.path.exists(videos_dir) and os.path.isdir(videos_dir):
+        try:
+            video_files = os.listdir(videos_dir)
+            for file in video_files:
+                filepath = os.path.join(videos_dir, file)
+                if os.path.isfile(filepath):
+                    # Check if file matches any video extension
+                    for ext in video_extensions:
+                        if file.lower().endswith(ext.lower()):
+                            # Extract filename without extension and compare case-insensitively
+                            file_title = os.path.splitext(file)[0].lower()
+                            if file_title == video_title_lower:
+                                log_with_timestamp(f"File already exists in videos directory: {filepath}")
+                                return True
+        except OSError:
+            log_with_timestamp("Could not list files in videos directory")
     
     return False
 
@@ -463,13 +501,15 @@ def run_yt_dlp(manifest_url, cookie, video_title=None):
     if not manifest_url:
         log_with_timestamp("No manifest URL provided")
         return False
-        
+    
+    # Record start time
+    start_time = datetime.now()
     log_with_timestamp(f"Starting download of: {manifest_url}")
     
     cmd = [
         "yt-dlp",
         "--referer", "https://shinybound.com",
-        "--concurrent-fragments", "12",
+        "--concurrent-fragments", "10",
         "--fragment-retries", "1",
         "--abort-on-error"
     ]
@@ -483,15 +523,21 @@ def run_yt_dlp(manifest_url, cookie, video_title=None):
     
     cmd.append(manifest_url)
     
-    print(f"Running command: {' '.join(cmd)}")
-    print("=" * 60)
+    log_with_timestamp(f"Running command: {' '.join(cmd)}")
+    log_with_timestamp("=" * 60)
     
     try:
         # Run without capturing output so we can see real-time progress
         result = subprocess.run(cmd)
         
-        print("=" * 60)
+        # Calculate duration
+        end_time = datetime.now()
+        duration = end_time - start_time
+        duration_str = str(duration).split('.')[0]  # Remove microseconds
+        
+        log_with_timestamp("=" * 60)
         log_with_timestamp(f"Download completed with return code: {result.returncode}")
+        log_with_timestamp(f"Download duration: {duration_str}")
         
         # Check if download was successful
         if result.returncode == 0:
@@ -502,7 +548,13 @@ def run_yt_dlp(manifest_url, cookie, video_title=None):
             return False
             
     except Exception as e:
+        # Calculate duration even on error
+        end_time = datetime.now()
+        duration = end_time - start_time
+        duration_str = str(duration).split('.')[0]  # Remove microseconds
+        
         log_with_timestamp(f"Error running yt-dlp: {e}")
+        log_with_timestamp(f"Time elapsed before error: {duration_str}")
         return False
 
 def is_manifest_url(url):
@@ -511,7 +563,7 @@ def is_manifest_url(url):
 
 def main():
     if not os.path.exists("list.txt"):
-        print("list.txt not found in the current directory.")
+        log_with_timestamp("list.txt not found in the current directory.")
         sys.exit(1)
 
     with open("list.txt", "r") as txtfile:
@@ -564,6 +616,11 @@ def main():
                     log_with_timestamp(f"Skipping download - file already exists: {video_title}")
                     i += 1
                     continue
+                
+                # Check if there's enough storage space before downloading
+                if not check_storage_space(min_gb=10):
+                    log_with_timestamp("Stopping downloads due to insufficient storage space")
+                    break
                 
                 # Use yt-dlp to download the video
                 success = run_yt_dlp(manifest_url, cookie, video_title)
