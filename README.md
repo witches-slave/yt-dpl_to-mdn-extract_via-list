@@ -5,10 +5,18 @@ This comprehensive guide will help you set up the automated video download and o
 ## Overview
 
 This system consists of 4 main scripts that work together:
-1. **sitemap_video_parser.py** - Extracts video URLs from sitemap → generates `list_video.txt`
+1. **sitemap_video_parser.py** - Extracts video URLs from sitemap OR manual crawling → generates `list_video.txt`
 2. **download.py** - Downloads videos from the list → saves to specified folder
-3. **sitemap_tag_parser.py** - Extracts tag/model URLs from sitemap → generates `list_tag.txt`  
-4. **tag_organizer.py** - Organizes videos by tags/models → creates organized folder structure with symlinks
+3. **sitemap_tag_parser.py** - Extracts tag/model URLs from sitemap OR manual crawling → generates `list_tag.txt` (tag/model URLs only)
+4. **tag_organizer.py** - Crawls tag/model pages, matches videos to local files, creates organized folder structure with symlinks
+
+### Key Features:
+- **✨ Enhanced Sitemap Support**: Both parsers now work with OR without sitemaps
+- **🕷️ Automatic Manual Crawling**: If no sitemap found, automatically offers to crawl pages manually  
+- **� Smart Video Matching**: Tag organizer crawls tag/model pages and matches videos to your local files
+- **📋 Complete Coverage**: Enhanced pagination logic ensures ALL pages are crawled (not just visible ones)
+- **🔧 Runtime Configuration**: All scripts now accept domain/credentials at runtime (no hardcoding needed)
+- **📁 User-Selected Video Folder**: Tag organizer lets you choose which video folder to organize
 
 ## Prerequisites
 
@@ -220,7 +228,7 @@ ffmpeg -version | head -1
    print('✓ sitemap_tag_parser.py imports OK')
    
    # Test tag organizer imports
-   from tag_organizer import setup_headless_browser, get_video_files
+   from tag_organizer import parse_enhanced_tag_list, get_video_files
    print('✓ tag_organizer.py imports OK')
    
    print('All scripts import successfully!')
@@ -236,10 +244,12 @@ ffmpeg -version | head -1
 cd ~/shiny-downloads
 source venv/bin/activate
 
-# Step 1: Parse sitemap and generate video list
+# Step 1: Parse sitemap OR manually crawl for video URLs
 python3 sitemap_video_parser.py
 # This will:
 # - Ask for domain (e.g., shinybound.com)
+# - Try to find and parse sitemap.xml first
+# - If no sitemap found, offer to manually crawl /updates/ pages
 # - Generate list_video.txt with all video URLs
 ```
 
@@ -254,13 +264,16 @@ python3 download.py
 # - Save videos to the specified folder
 ```
 
-#### **Phase 3: Extract Tag/Model URLs**
+#### **Phase 3: Extract Tag/Model URLs and Associated Videos**
 ```bash
-# Step 3: Parse sitemap and generate tag/model list
-python3 sitemap_tag_parser.py https://yourdomain.com/sitemap.xml
+# Step 3: Parse sitemap OR manually crawl for tag/model URLs AND their videos
+python3 sitemap_tag_parser.py
 # This will:
-# - Parse the sitemap (replace with your actual domain)
-# - Generate list_tag.txt with all tag and model URLs
+# - Ask for domain input
+# - Try to find and parse sitemap.xml first
+# - If no sitemap found, offer to manually crawl /tags/ and /models/ pages
+# - Extract individual tag/model URLs from listing pages
+# - Generate list_tag.txt with tag/model URLs only
 ```
 
 #### **Phase 4: Organize by Tags**
@@ -268,20 +281,43 @@ python3 sitemap_tag_parser.py https://yourdomain.com/sitemap.xml
 # Step 4: Organize videos by tags and models
 python3 tag_organizer.py
 # This will:
-# - Read list_tag.txt
-# - Scan the videos/ folder (or your specified download folder)
-# - Create tags/ folder with organized symlinks
-# - Create "tag no tag" folder for untagged videos
-# - Create "source videos" folder with all videos
+# - Read list_tag.txt, crawl each tag/model page, match videos to local files, create symlinks
+# - Let you select which video folder to organize
+# - Create tags/ folder with organized symlinks  
+# - Create "No Tag" folder for untagged videos
+# - Use fuzzy matching to connect online video titles to your local files
 ```
+
+### **For Sites WITHOUT Sitemaps:**
+
+Both parsers now automatically detect when sitemaps are unavailable and offer manual crawling:
+
+```bash
+# Video parser will crawl:
+# • /updates/ page and all pagination pages
+# • Extract individual video URLs from each page
+
+# Tag parser will crawl:  
+# • /tags/ page and all its pagination
+# • /models/ page and all its pagination  
+# • Extract individual tag/model URLs from each page
+# • Generate list_tag.txt with ONLY tag/model URLs
+# • Create complete video-to-tag/model mappings for faster organization
+```
+
+### **Enhanced Features:**
+- **🎯 Complete pagination coverage**: Generates ALL page URLs from 1 to last (not just visible ones)
+- **⚡ Performance optimizations**: Reduced wait times, smarter request handling
+- **🔧 User-friendly prompts**: Video folder selection and workflow validation
+- **📂 Flexible input**: Runtime domain/email/password/folder input (no hardcoding)
 
 ### **Alternative: One-liner for experienced users**
 ```bash
-# Complete workflow (replace domain as needed)
+# Complete workflow (domain will be requested at runtime)
 source venv/bin/activate && \
 python3 sitemap_video_parser.py && \
 python3 download.py && \
-python3 sitemap_tag_parser.py https://yourdomain.com/sitemap.xml && \
+python3 sitemap_tag_parser.py && \
 python3 tag_organizer.py
 ```
 
@@ -297,19 +333,16 @@ python3 tag_organizer.py
 
 2. **"list_tag.txt not found" error:**
    ```bash
-   # Run the tag parser first (replace with your domain):
-   python3 sitemap_tag_parser.py https://yourdomain.com/sitemap.xml
+   # Run the tag parser first:
+   python3 sitemap_tag_parser.py
+   # It will ask for domain and handle sitemap/manual crawling automatically
    ```
 
-3. **"./videos/ directory not found" in tag_organizer.py:**
+3. **Video folder not found in tag_organizer.py:**
    ```bash
-   # The tag organizer looks for videos in ./videos/ by default
-   # If you used a different folder name in download.py, either:
-   # Option 1: Rename your folder to 'videos'
-   mv your_folder_name videos
-   
-   # Option 2: Create a symlink
-   ln -s your_folder_name videos
+   # The tag organizer prompts you to select a video folder
+   # If you're unsure which folder to choose, check where download.py saved videos:
+   cat .download_config.txt  # Shows last used folder from download.py
    ```
 
 4. **Chrome not found error:**
@@ -349,6 +382,13 @@ python3 tag_organizer.py
    sudo apt install ffmpeg -y
    ```
 
+8. **Manual crawling taking too long?**
+   ```bash
+   # The scripts now have optimized wait times and pagination detection
+   # You can cancel manual crawling and try to find a sitemap URL manually:
+   python3 find_sitemap.py  # Helper script to discover sitemaps
+   ```
+
 8. **Chrome crashes in headless mode:**
    ```bash
    # Add to your script or run with these Chrome options
@@ -368,9 +408,8 @@ python3 tag_organizer.py
 
 10. **sitemap_tag_parser.py domain mismatch:**
     ```bash
-    # Current limitation: hardcoded domain filtering
-    # Make sure your domain matches the expected format
-    # This will be fixed in future versions
+    # All scripts now ask for domain at runtime
+    # Make sure to enter the domain in the correct format (e.g., https://example.com)
     ```
 
 ## File Structure
@@ -408,9 +447,8 @@ Your final directory structure should look like this:
 ### **Current Issues:**
 
 1. **sitemap_tag_parser.py inconsistency**: 
-   - Unlike sitemap_video_parser.py, requires command line argument
-   - Has hardcoded domain filtering
-   - Should be updated to match video parser pattern
+   - All scripts now ask for domain at runtime (no hardcoding)
+   - Should be fully flexible and user-friendly
 
 2. **Workflow validation missing**:
    - Scripts don't check if prerequisite files exist
@@ -441,7 +479,7 @@ Your final directory structure should look like this:
    - Better error messages with suggested fixes
 
 4. **Improve folder handling**:
-   - tag_organizer.py should auto-detect download folder from download.py
+   - tag_organizer.py now prompts user to select video folder
    - Better handling of custom folder names
 
 ## Security Notes

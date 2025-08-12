@@ -851,19 +851,72 @@ def is_manifest_url(url):
     """Check if URL is already a manifest URL"""
     return url and ('/manifest/video.mpd' in url or url.endswith('.mpd'))
 
+def validate_prerequisites():
+    """Validate that required files exist before starting"""
+    log_with_timestamp("Validating prerequisites...")
+    
+    if not os.path.exists("list_video.txt"):
+        log_with_timestamp("❌ ERROR: list_video.txt not found in the current directory.")
+        log_with_timestamp("💡 SOLUTION: Run 'python3 sitemap_video_parser.py' first to generate the video list.")
+        log_with_timestamp("   This script extracts video URLs from the sitemap and creates list_video.txt")
+        return False
+    
+    # Check if list_video.txt is empty
+    try:
+        with open("list_video.txt", "r") as f:
+            lines = [line.strip() for line in f if line.strip()]
+            if not lines:
+                log_with_timestamp("❌ ERROR: list_video.txt is empty.")
+                log_with_timestamp("💡 SOLUTION: Run 'python3 sitemap_video_parser.py' to populate the video list.")
+                return False
+            log_with_timestamp(f"✅ Found {len(lines)} video URLs in list_video.txt")
+    except Exception as e:
+        log_with_timestamp(f"❌ ERROR: Could not read list_video.txt: {e}")
+        return False
+    
+    log_with_timestamp("✅ Prerequisites validated successfully")
+    return True
+
 def main():
+    # Check if we're in dry-run mode
+    dry_run = "--dry-run" in sys.argv
+    if dry_run:
+        log_with_timestamp("🔍 DRY-RUN MODE: Will preview actions without downloading")
+        log_separator()
+    
+    # Validate prerequisites first
+    if not validate_prerequisites():
+        log_separator()
+        log_with_timestamp("Exiting due to validation errors. Please fix the issues above and try again.")
+        sys.exit(1)
+    
+    log_separator()
+    
     # Get user inputs for domain, email, and password
     domain, email, password = get_user_inputs()
     
     # Get output folder
     output_folder = get_output_folder()
     
-    if not os.path.exists("list_video.txt"):
-        log_with_timestamp("list_video.txt not found in the current directory.")
-        sys.exit(1)
+    # Save output folder info for other scripts to use
+    try:
+        with open(".download_config.txt", "w") as f:
+            f.write(f"output_folder={output_folder}\n")
+            f.write(f"domain={domain}\n")
+        log_with_timestamp(f"📝 Saved configuration for other scripts")
+    except Exception as e:
+        log_with_timestamp(f"⚠️  Warning: Could not save config file: {e}")
 
     with open("list_video.txt", "r") as txtfile:
         links = [line.strip() for line in txtfile if line.strip()]
+
+    if dry_run:
+        log_with_timestamp(f"🔍 DRY-RUN: Would process {len(links)} video URLs")
+        log_with_timestamp(f"🔍 DRY-RUN: Would save videos to folder: {output_folder}")
+        log_with_timestamp(f"🔍 DRY-RUN: Would authenticate with domain: {domain}")
+        log_separator()
+        log_with_timestamp("DRY-RUN complete. Use without --dry-run to actually download.")
+        return
 
     # Check if we have any page URLs that require authentication
     page_urls = [link for link in links if not is_manifest_url(link)]
