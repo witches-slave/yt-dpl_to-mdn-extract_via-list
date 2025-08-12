@@ -261,6 +261,64 @@ def extract_tag_name_from_url(url):
         log_with_timestamp(f"Error extracting tag name from {url}: {e}")
         return "Unknown"
 
+def create_source_aware_symlink(target_path, tag_folder, video_files_dict):
+    """Create symlink with source folder awareness to handle conflicts"""
+    
+    # Get the source folder name from the target path
+    source_folder = os.path.basename(os.path.dirname(target_path))
+    original_filename = os.path.basename(target_path)
+    filename_without_ext = os.path.splitext(original_filename)[0]
+    file_extension = os.path.splitext(original_filename)[1]
+    
+    # First, try the original filename
+    link_path = os.path.join(tag_folder, original_filename)
+    
+    # Check if a link with this name already exists and points to a different file
+    if os.path.exists(link_path) or os.path.islink(link_path):
+        try:
+            existing_target = os.path.realpath(link_path)
+            current_target = os.path.realpath(target_path)
+            
+            # If it's the same file, no need to create another link
+            if existing_target == current_target:
+                return True, "already_exists"
+            
+            # Different file with same name - add source folder to filename
+            source_aware_filename = f"{filename_without_ext} ({source_folder}){file_extension}"
+            link_path = os.path.join(tag_folder, source_aware_filename)
+            
+            # If the source-aware filename also exists, check if it's the same file
+            if os.path.exists(link_path) or os.path.islink(link_path):
+                existing_source_target = os.path.realpath(link_path)
+                if existing_source_target == current_target:
+                    return True, "already_exists"
+                    
+                # Still a conflict - add a counter
+                counter = 2
+                while True:
+                    counter_filename = f"{filename_without_ext} ({source_folder})_{counter}{file_extension}"
+                    counter_link_path = os.path.join(tag_folder, counter_filename)
+                    
+                    if not (os.path.exists(counter_link_path) or os.path.islink(counter_link_path)):
+                        link_path = counter_link_path
+                        break
+                    
+                    counter_target = os.path.realpath(counter_link_path)
+                    if counter_target == current_target:
+                        return True, "already_exists"
+                    
+                    counter += 1
+                    if counter > 10:  # Safety limit
+                        break
+            
+        except (OSError, IOError):
+            # If we can't read the existing link, create source-aware name anyway
+            source_aware_filename = f"{filename_without_ext} ({source_folder}){file_extension}"
+            link_path = os.path.join(tag_folder, source_aware_filename)
+    
+    # Create the symlink
+    return create_symlink_safe(target_path, link_path)
+
 def create_symlink_safe(target_path, link_path):
     """Create symlink with error handling and fallback to hard link"""
     try:
@@ -357,14 +415,14 @@ def main():
                 matching_file = find_matching_video(video_title, video_files)
                 
                 if matching_file:
-                    # Create symlink/hardlink
-                    filename = os.path.basename(matching_file)
-                    link_path = os.path.join(tag_folder, filename)
-                    
-                    success, link_type = create_symlink_safe(matching_file, link_path)
+                    # Create source-aware symlink/hardlink to handle conflicts
+                    success, link_type = create_source_aware_symlink(matching_file, tag_folder, video_files)
                     if success:
                         matched_count += 1
                         total_links_created += 1
+                        if link_type not in ["already_exists"]:
+                            source_folder = os.path.basename(os.path.dirname(matching_file))
+                            log_with_timestamp(f"     📁 Linked: {os.path.basename(matching_file)} from {source_folder}")
                 else:
                     unmatched_videos.append((tag_name, video_title))
             
@@ -393,11 +451,9 @@ def main():
         for video_path in video_files.values():
             real_video_path = os.path.realpath(video_path)
             if real_video_path not in linked_files:
-                filename = os.path.basename(video_path)
-                link_path = os.path.join(no_tag_folder, filename)
-                
-                success, link_type = create_symlink_safe(video_path, link_path)
-                if success:
+                # Use source-aware linking for "No Tag" folder too
+                success, link_type = create_source_aware_symlink(video_path, no_tag_folder, video_files)
+                if success and link_type not in ["already_exists"]:
                     no_tag_count += 1
         
         log_with_timestamp(f"   ✅ Added {no_tag_count} untagged videos to 'No Tag' folder")
