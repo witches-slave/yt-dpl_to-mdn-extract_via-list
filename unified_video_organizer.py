@@ -145,7 +145,113 @@ def get_user_inputs():
     video_folder = os.path.abspath(video_folder)
     organization_folder = os.path.abspath(organization_folder)
     
-    print(f"\nDomain: {domain}")
+    def get_user_inputs():
+    """Get domain and video folder from user"""
+    print("=" * 60)
+    print("UNIFIED VIDEO ORGANIZER")
+    print("=" * 60)
+    print()
+    
+    # Check if list_video.txt exists
+    if not os.path.exists("list_video.txt"):
+        print("❌ ERROR: list_video.txt not found in the current directory.")
+        print("💡 SOLUTION: Run 'python3 sitemap_video_parser.py' first to generate the video list.")
+        print("   This script extracts video URLs from the sitemap and creates list_video.txt")
+        sys.exit(1)
+    
+    # Check if list_video.txt is empty and parse it
+    try:
+        video_entries = parse_video_list()
+        if not video_entries:
+            print("❌ ERROR: list_video.txt is empty or has no valid entries.")
+            print("💡 SOLUTION: Run 'python3 sitemap_video_parser.py' to populate the video list.")
+            sys.exit(1)
+        log_with_timestamp(f"✅ Found {len(video_entries)} video entries in list_video.txt")
+    except Exception as e:
+        print(f"❌ ERROR: Could not read list_video.txt: {e}")
+        sys.exit(1)
+    
+    # Get domain
+    domain = input("Enter the domain (e.g., https://shinybound.com): ").strip()
+    if not domain:
+        print("Error: Domain cannot be empty")
+        sys.exit(1)
+    
+    # Ensure domain has proper format
+    if not domain.startswith(('http://', 'https://')):
+        domain = 'https://' + domain
+    domain = domain.rstrip('/')
+    
+    # Get source folder path
+    video_folder = input("Enter the source folder path (where your videos are stored): ").strip()
+    if not video_folder:
+        print("Error: Video folder cannot be empty")
+        sys.exit(1)
+    
+    if not os.path.exists(video_folder):
+        print(f"Error: Video folder does not exist: {video_folder}")
+        sys.exit(1)
+    
+    # Get target tags folder (where symlinks will be created)
+    organization_folder = input("Enter the tags folder path (where symlinks will be created): ").strip()
+    if not organization_folder:
+        print("Error: Tags folder cannot be empty")
+        sys.exit(1)
+    
+    # Create tags folder if it doesn't exist
+    os.makedirs(organization_folder, exist_ok=True)
+    
+    # Expand paths
+    video_folder = os.path.abspath(video_folder)
+    organization_folder = os.path.abspath(organization_folder)
+    
+    print(f"
+Domain: {domain}")
+    print(f"Source folder: {video_folder}")
+    print(f"Tags folder: {organization_folder}")
+    print(f"Video entries: {len(video_entries)} videos from list_video.txt")
+    print("="*60 + "
+")
+    
+    return domain, video_folder, organization_folder
+
+def parse_video_list(filename='list_video.txt'):
+    """Parse list_video.txt file that contains URL|TITLE format"""
+    video_entries = []
+    
+    try:
+        with open(filename, "r", encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Check if line contains the new format (URL|TITLE)
+                if '|' in line:
+                    parts = line.split('|', 1)
+                    if len(parts) == 2:
+                        url, title = parts
+                        video_entries.append({
+                            'url': url.strip(),
+                            'title': title.strip() if title.strip() else None
+                        })
+                    else:
+                        # Malformed line, treat as URL only
+                        video_entries.append({
+                            'url': line.strip(),
+                            'title': None
+                        })
+                else:
+                    # Old format (URL only)
+                    video_entries.append({
+                        'url': line.strip(),
+                        'title': None
+                    })
+    
+    except Exception as e:
+        raise Exception(f"Error reading {filename}: {e}")
+    
+    return video_entries
     print(f"Source folder: {video_folder}")
     print(f"Tags folder: {organization_folder}")
     print(f"Video URLs: {len(lines)} videos from list_video.txt")
@@ -347,19 +453,18 @@ def process_videos_from_list(domain, video_folder, organization_folder):
     """Process videos from list_video.txt file"""
     log_with_timestamp("🕷️  Starting video processing from list_video.txt")
     
-    # Read video URLs from list_video.txt
+    # Read video entries from list_video.txt
     try:
-        with open("list_video.txt", "r") as f:
-            video_urls = [line.strip() for line in f if line.strip()]
+        video_entries = parse_video_list()
     except Exception as e:
         log_with_timestamp(f"Error reading list_video.txt: {e}")
         return [], []
     
-    if not video_urls:
-        log_with_timestamp("No video URLs found in list_video.txt")
+    if not video_entries:
+        log_with_timestamp("No video entries found in list_video.txt")
         return [], []
     
-    log_with_timestamp(f"Found {len(video_urls)} video URLs to process")
+    log_with_timestamp(f"Found {len(video_entries)} video entries to process")
     
     driver = setup_headless_browser()
     if not driver:
@@ -371,21 +476,36 @@ def process_videos_from_list(domain, video_folder, organization_folder):
     processed_models = {}  # Cache for model images to avoid re-downloading
     
     try:
-        # Process each video URL
-        for i, video_url in enumerate(video_urls, 1):
-            log_with_timestamp(f"\n🎬 Processing video {i}/{len(video_urls)}")
-            log_with_timestamp(f"     URL: {video_url}")
+        # Process each video entry
+        for i, entry in enumerate(video_entries, 1):
+            video_url = entry['url']
+            pre_extracted_title = entry['title']  # Title from sitemap parser (may be URL-based)
             
-            # Extract metadata
+            log_with_timestamp(f"\n🎬 Processing video {i}/{len(video_entries)}")
+            log_with_timestamp(f"     URL: {video_url}")
+            if pre_extracted_title:
+                log_with_timestamp(f"     Pre-extracted title: {pre_extracted_title}")
+            
+            # Extract metadata from the video page
             metadata = extract_video_metadata(driver, video_url)
-            if metadata:
-                video_title = metadata.get('title', 'Unknown')
-                log_with_timestamp(f"     ✅ Title: {video_title}")
+            if not metadata:
+                log_with_timestamp(f"     ❌ Failed to extract metadata from {video_url}")
+                continue
+            
+            # Determine which title to use for file matching
+            # Priority: pre-extracted title (from sitemap parser) > extracted title
+            final_title = pre_extracted_title or metadata.get('title', '')
+            
+            if final_title:
+                # Update metadata with the final title
+                metadata['title'] = final_title
+                log_with_timestamp(f"     ✅ Using title: {final_title}")
                 log_with_timestamp(f"        Model: {metadata.get('model', 'Unknown')}")
                 log_with_timestamp(f"        Tags: {len(metadata.get('tags', []))} tags")
                 
-                # Try to organize this video immediately
-                video_file = find_video_file(video_folder, video_title)
+                # Try to find the video file using the final title
+                video_file = find_video_file(video_folder, final_title)
+                
                 if video_file:
                     log_with_timestamp(f"        ✅ Found local file: {os.path.basename(video_file)}")
                     processed_videos.append(metadata)
@@ -394,13 +514,19 @@ def process_videos_from_list(domain, video_folder, organization_folder):
                 else:
                     log_with_timestamp(f"        ❌ Local file not found")
                     missing_videos.append({
-                        'title': video_title,
-                        'url': metadata.get('url', ''),
+                        'title': final_title,
+                        'url': video_url,
                         'model': metadata.get('model', ''),
                         'tags': metadata.get('tags', [])
                     })
             else:
-                log_with_timestamp(f"     ❌ Failed to extract metadata")
+                log_with_timestamp(f"     ❌ No title available for video: {video_url}")
+                missing_videos.append({
+                    'title': 'Unknown Title',
+                    'url': video_url,
+                    'model': '',
+                    'tags': []
+                })
             
             # Small delay between videos
             time.sleep(1)
@@ -885,6 +1011,9 @@ def download_image(url, save_path):
 
 def find_video_file(video_folder, video_title):
     """Find a video file matching the title (case-insensitive exact match)"""
+    if not video_title:
+        return None
+        
     # Clean title for filename matching (remove special characters, normalize spaces)
     clean_title = re.sub(r'[^\w\s-]', '', video_title).strip()
     clean_title = re.sub(r'\s+', ' ', clean_title)
@@ -905,6 +1034,29 @@ def find_video_file(video_folder, video_title):
             # Case-insensitive exact match
             if clean_title.lower() == clean_filename.lower():
                 return video_file
+    
+    # If no exact match found and title looks like a URL-based title (all caps with spaces)
+    # Try to match against normal titles by converting back to typical title case
+    if video_title.isupper() and ' ' in video_title:
+        # Try converting URL-based title back to normal case for matching
+        normal_title = video_title.title()  # Convert to Title Case
+        
+        for ext in video_extensions:
+            pattern = os.path.join(video_folder, f"**/{ext}")
+            for video_file in glob.glob(pattern, recursive=True):
+                video_filename = os.path.basename(video_file)
+                video_name = os.path.splitext(video_filename)[0]
+                
+                # Clean filename
+                clean_filename = re.sub(r'[^\w\s-]', '', video_name).strip()
+                clean_filename = re.sub(r'\s+', ' ', clean_filename)
+                
+                # Try matching with converted title
+                clean_normal_title = re.sub(r'[^\w\s-]', '', normal_title).strip()
+                clean_normal_title = re.sub(r'\s+', ' ', clean_normal_title)
+                
+                if clean_normal_title.lower() == clean_filename.lower():
+                    return video_file
     
     return None
 

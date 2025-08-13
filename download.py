@@ -846,39 +846,30 @@ def extract_mpd_url_with_title(driver, page_url, domain, video_title):
         log_with_timestamp(f"Error extracting manifest URL: {e}")
         return None, video_title
 
-def check_file_exists(video_title, output_folder=None):
-    """Check if a file with the given title already exists in output folder or current directory (case-insensitive)"""
-    if not video_title:
+def validate_prerequisites():
+    """Validate that required files exist before starting"""
+    log_with_timestamp("Validating prerequisites...")
+    
+    if not os.path.exists("list_video.txt"):
+        log_with_timestamp("❌ ERROR: list_video.txt not found in the current directory.")
+        log_with_timestamp("💡 SOLUTION: Run 'python3 sitemap_video_parser.py' first to generate the video list.")
+        log_with_timestamp("   This script extracts video URLs from the sitemap and creates list_video.txt")
         return False
     
-    # Common video file extensions
-    video_extensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v']
-    
-    # Normalize video title for comparison (lowercase)
-    video_title_lower = video_title.lower()
-    
-    # Determine which directory to check
-    check_dir = output_folder if output_folder else "."
-    
-    # Check in specified directory
+    # Check if list_video.txt is empty
     try:
-        files = os.listdir(check_dir)
-        for file in files:
-            file_path = os.path.join(check_dir, file)
-            if os.path.isfile(file_path):
-                # Check if file matches any video extension
-                for ext in video_extensions:
-                    if file.lower().endswith(ext.lower()):
-                        # Extract filename without extension and compare case-insensitively
-                        file_title = os.path.splitext(file)[0].lower()
-                        if file_title == video_title_lower:
-                            log_with_timestamp(f"File already exists: {file_path}")
-                            return True
-    except OSError:
-        log_with_timestamp(f"Could not list files in directory: {check_dir}")
+        video_entries = parse_video_list()
+        if not video_entries:
+            log_with_timestamp("❌ ERROR: list_video.txt is empty or has no valid entries.")
+            log_with_timestamp("💡 SOLUTION: Run 'python3 sitemap_video_parser.py' to populate the video list.")
+            return False
+        log_with_timestamp(f"✅ Found {len(video_entries)} video entries in list_video.txt")
+    except Exception as e:
+        log_with_timestamp(f"❌ ERROR: Could not read list_video.txt: {e}")
         return False
     
-    return False
+    log_with_timestamp("✅ Prerequisites validated successfully")
+    return True
 
 def run_yt_dlp(manifest_url, cookie, video_title=None, domain=None, output_folder=None):
     """Download video using yt-dlp with the manifest URL and custom filename"""
@@ -963,36 +954,133 @@ def run_yt_dlp(manifest_url, cookie, video_title=None, domain=None, output_folde
         log_with_timestamp(f"Duration: {duration_str}")
         return False
 
+def check_file_exists(video_title, output_folder=None):
+    """Check if a file with the given title already exists in output folder or current directory (case-insensitive)"""
+    if not video_title:
+        return False
+    
+    # Common video file extensions
+    video_extensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v']
+    
+    # Normalize video title for comparison (lowercase)
+    video_title_lower = video_title.lower()
+    
+    # Determine which directory to check
+    check_dir = output_folder if output_folder else "."
+    
+    # Check in specified directory
+    try:
+        files = os.listdir(check_dir)
+        for file in files:
+            file_path = os.path.join(check_dir, file)
+            if os.path.isfile(file_path):
+                # Check if file matches any video extension
+                for ext in video_extensions:
+                    if file.lower().endswith(ext.lower()):
+                        # Extract filename without extension and compare case-insensitively
+                        file_title = os.path.splitext(file)[0].lower()
+                        if file_title == video_title_lower:
+                            log_with_timestamp(f"File already exists: {file_path}")
+                            return True
+    except OSError:
+        log_with_timestamp(f"Could not list files in directory: {check_dir}")
+        return False
+    
+    return False
+
+def parse_video_list(filename='list_video.txt'):
+    """Parse list_video.txt file that contains URL|TITLE format"""
+    video_entries = []
+    
+    try:
+        with open(filename, "r", encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Check if line contains the new format (URL|TITLE)
+                if '|' in line:
+                    parts = line.split('|', 1)
+                    if len(parts) == 2:
+                        url, title = parts
+                        video_entries.append({
+                            'url': url.strip(),
+                            'title': title.strip() if title.strip() else None
+                        })
+                    else:
+                        # Malformed line, treat as URL only
+                        video_entries.append({
+                            'url': line.strip(),
+                            'title': None
+                        })
+                else:
+                    # Old format (URL only)
+                    video_entries.append({
+                        'url': line.strip(),
+                        'title': None
+                    })
+    
+    except Exception as e:
+        log_with_timestamp(f"Error reading {filename}: {e}")
+        return []
+    
+    return video_entries
+
+def check_for_duplicate_titles_in_folder(output_folder):
+    """Check for files with duplicate titles in the output folder and handle them"""
+    if not output_folder or not os.path.exists(output_folder):
+        return []
+    
+    log_with_timestamp("🔍 Checking for duplicate video titles in output folder...")
+    
+    video_extensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v']
+    title_counts = {}
+    all_files = []
+    
+    try:
+        files = os.listdir(output_folder)
+        for file in files:
+            file_path = os.path.join(output_folder, file)
+            if os.path.isfile(file_path):
+                # Check if file is a video
+                for ext in video_extensions:
+                    if file.lower().endswith(ext.lower()):
+                        title = os.path.splitext(file)[0].lower()
+                        if title not in title_counts:
+                            title_counts[title] = []
+                        title_counts[title].append(file_path)
+                        all_files.append(file_path)
+                        break
+    except Exception as e:
+        log_with_timestamp(f"Error checking folder: {e}")
+        return []
+    
+    # Find duplicates
+    duplicate_files = []
+    for title, files in title_counts.items():
+        if len(files) > 1:
+            log_with_timestamp(f"  ⚠️  Found {len(files)} files with duplicate title: '{title}'")
+            for file_path in files:
+                log_with_timestamp(f"    - {os.path.basename(file_path)}")
+                duplicate_files.append(file_path)
+    
+    if duplicate_files:
+        log_with_timestamp(f"🗑️  Removing {len(duplicate_files)} duplicate files to allow proper re-download...")
+        for file_path in duplicate_files:
+            try:
+                os.remove(file_path)
+                log_with_timestamp(f"  ✅ Removed: {os.path.basename(file_path)}")
+            except Exception as e:
+                log_with_timestamp(f"  ❌ Failed to remove {os.path.basename(file_path)}: {e}")
+    else:
+        log_with_timestamp("✅ No duplicate titles found in output folder")
+    
+    return duplicate_files
+
 def is_manifest_url(url):
     """Check if URL is already a manifest URL"""
     return url and ('/manifest/video.mpd' in url or url.endswith('.mpd'))
-
-def validate_prerequisites():
-    """Validate that required files exist before starting"""
-    log_with_timestamp("Validating prerequisites...")
-    
-    if not os.path.exists("list_video.txt"):
-        log_with_timestamp("❌ ERROR: list_video.txt not found in the current directory.")
-        log_with_timestamp("💡 SOLUTION: Run 'python3 sitemap_video_parser.py' first to generate the video list.")
-        log_with_timestamp("   This script extracts video URLs from the sitemap and creates list_video.txt")
-        return False
-    
-    # Check if list_video.txt is empty
-    try:
-        with open("list_video.txt", "r") as f:
-            lines = [line.strip() for line in f if line.strip()]
-            if not lines:
-                log_with_timestamp("❌ ERROR: list_video.txt is empty.")
-                log_with_timestamp("💡 SOLUTION: Run 'python3 sitemap_video_parser.py' to populate the video list.")
-                return False
-            log_with_timestamp(f"✅ Found {len(lines)} video URLs in list_video.txt")
-    except Exception as e:
-        log_with_timestamp(f"❌ ERROR: Could not read list_video.txt: {e}")
-        return False
-    
-    log_with_timestamp("✅ Prerequisites validated successfully")
-    return True
-
 def main():
     # Check if we're in dry-run mode
     dry_run = "--dry-run" in sys.argv
@@ -1014,6 +1102,9 @@ def main():
     # Get output folder
     output_folder = get_output_folder()
     
+    # Check for and handle duplicate titles in output folder
+    check_for_duplicate_titles_in_folder(output_folder)
+    
     # Save output folder info for other scripts to use
     try:
         with open(".download_config.txt", "w") as f:
@@ -1023,26 +1114,32 @@ def main():
     except Exception as e:
         log_with_timestamp(f"⚠️  Warning: Could not save config file: {e}")
 
-    with open("list_video.txt", "r") as txtfile:
-        links = [line.strip() for line in txtfile if line.strip()]
+    # Parse video entries from list_video.txt
+    video_entries = parse_video_list()
 
     if dry_run:
-        log_with_timestamp(f"🔍 DRY-RUN: Would process {len(links)} video URLs")
+        log_with_timestamp(f"🔍 DRY-RUN: Would process {len(video_entries)} video entries")
         log_with_timestamp(f"🔍 DRY-RUN: Would save videos to folder: {output_folder}")
         log_with_timestamp(f"🔍 DRY-RUN: Would authenticate with domain: {domain}")
+        # Show some examples
+        for i, entry in enumerate(video_entries[:5]):
+            title_info = f" (Title: {entry['title']})" if entry['title'] else " (No title provided)"
+            log_with_timestamp(f"  Entry {i+1}: {entry['url']}{title_info}")
+        if len(video_entries) > 5:
+            log_with_timestamp(f"  ... and {len(video_entries) - 5} more entries")
         log_separator()
         log_with_timestamp("DRY-RUN complete. Use without --dry-run to actually download.")
         return
 
-    # Check if we have any page URLs that require authentication
-    page_urls = [link for link in links if not is_manifest_url(link)]
-    manifest_urls = [link for link in links if is_manifest_url(link)]
+    # Separate page URLs from direct manifest URLs
+    page_entries = [entry for entry in video_entries if not is_manifest_url(entry['url'])]
+    manifest_entries = [entry for entry in video_entries if is_manifest_url(entry['url'])]
     
-    log_with_timestamp(f"Found {len(page_urls)} page URLs and {len(manifest_urls)} direct manifest URLs")
+    log_with_timestamp(f"Found {len(page_entries)} page URLs and {len(manifest_entries)} direct manifest URLs")
     log_separator()
     
     # Only perform login if we have page URLs
-    if page_urls:
+    if page_entries:
         log_with_timestamp("Page URLs detected - automated login required for browser extraction")
         driver, cookie = setup_browser_with_login(email, password, domain)
         
@@ -1062,18 +1159,22 @@ def main():
     i = 0
     successful_downloads = 0
     try:
-        while i < len(links):
-            url = links[i]
+        while i < len(video_entries):
+            entry = video_entries[i]
+            url = entry['url']
+            pre_extracted_title = entry['title']  # Title from sitemap parser
+            
             log_separator()
             log_section_break()
-            log_with_timestamp(f"Processing link {i+1}/{len(links)}: {url}")
+            title_info = f" (Pre-extracted title: {pre_extracted_title})" if pre_extracted_title else ""
+            log_with_timestamp(f"Processing entry {i+1}/{len(video_entries)}: {url}{title_info}")
             log_section_break()
             
             if is_manifest_url(url):
                 # Direct manifest URL - use it directly
                 log_with_timestamp("✓ Direct manifest URL detected, using directly")
                 manifest_url = url
-                video_title = None  # No title extraction for direct manifest URLs
+                video_title = pre_extracted_title  # Use pre-extracted title if available
             else:
                 # Page URL - OPTIMIZATION: Extract title and manifest URL in single page load
                 log_with_timestamp("Page URL detected, processing video page...")
@@ -1084,7 +1185,7 @@ def main():
                     continue
                 
                 # Extract both title and manifest URL in a single page load (OPTIMIZED)
-                manifest_url, video_title, is_redirect = extract_title_and_manifest_url(driver, url, domain)
+                manifest_url, extracted_title, is_redirect = extract_title_and_manifest_url(driver, url, domain)
                 
                 if is_redirect:
                     log_with_timestamp("Skipping redirected page...")
@@ -1092,7 +1193,10 @@ def main():
                     i += 1
                     continue
                 
-                # Check if file already exists after getting the title
+                # Use pre-extracted title if we have it, otherwise use extracted title
+                video_title = pre_extracted_title or extracted_title
+                
+                # Check if file already exists after determining the title
                 if video_title and check_file_exists(video_title, output_folder):
                     log_with_timestamp(f"✓ File already exists, skipping: {video_title}")
                     log_separator()
@@ -1106,7 +1210,7 @@ def main():
                     i += 1
                     continue
                 
-                log_with_timestamp("✓ Ready to download - both title and manifest URL extracted")
+                log_with_timestamp("✓ Ready to download - manifest URL extracted")
             
             if manifest_url:
                 # Check if there's enough storage space before downloading
@@ -1120,8 +1224,8 @@ def main():
                 
                 log_separator()
                 if not success:
-                    log_with_timestamp(f"✗ Download failed for link {i+1}")
-                    if page_urls:  # Only prompt for new credentials if we're using page URLs
+                    log_with_timestamp(f"✗ Download failed for entry {i+1}")
+                    if page_entries:  # Only prompt for new credentials if we're using page URLs
                         log_with_timestamp("Download failed. Trying to re-authenticate...")
                         log_separator()
                         if driver:
@@ -1160,7 +1264,7 @@ def main():
         log_section_break()
         log_with_timestamp("DOWNLOAD SUMMARY")
         log_section_break()
-        log_with_timestamp(f"Total links processed: {i}")
+        log_with_timestamp(f"Total entries processed: {i}")
         log_with_timestamp(f"Successful downloads: {successful_downloads}")
         log_with_timestamp(f"Failed/Skipped: {i - successful_downloads}")
         if i > 0:

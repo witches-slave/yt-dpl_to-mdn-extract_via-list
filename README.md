@@ -11,7 +11,9 @@ This system consists of 3 main scripts that work together:
 
 ### Key Features:
 - **🎯 Reliable URL Extraction**: Crawls live /updates/ pages to get current video URLs (avoids dead links from sitemaps)
-- **📄 Shared Video List**: All scripts use the same list_video.txt for consistency
+- **� Duplicate Title Handling**: Automatically detects duplicate video titles and uses URL-based naming to avoid conflicts
+- **📄 Enhanced Video List**: list_video.txt now stores both URL and title for each video (format: URL|TITLE)
+- **🧹 Smart Cleanup**: Automatically removes existing duplicate files before re-downloading with proper names
 - **📊 Rich Metadata**: Extracts tags, models, related videos, and downloads model images
 - **🔗 Smart Symlinks**: Creates organized folder structure with relative symlinks for cross-platform compatibility
 - **📁 Jellyfin Integration**: Generates NFO files and folder.jpg images for perfect Jellyfin integration
@@ -220,6 +222,25 @@ python3 unified_video_organizer.py
     │   ├── actress.nfo        # Jellyfin actress metadata
     │   └── video2.mp4         # Symlink to original
     └── tag no tag/           # Untagged videos
+```
+
+### Duplicate Title Handling
+
+The system automatically handles videos with duplicate titles:
+
+1. **Detection**: sitemap_video_parser.py detects when multiple videos have the same title
+2. **URL-based Naming**: For duplicates, it uses the URL path (after /updates/) as the title instead
+3. **Example**: 
+   - Normal: "AMAZING VIDEO" 
+   - Duplicate: "AMAZING VIDEO UPDATE 123" (derived from URL path)
+4. **Cleanup**: download.py automatically removes existing duplicate files before re-downloading with proper names
+5. **Consistency**: All scripts (download.py, unified_video_organizer.py) use the same title resolution logic
+
+**list_video.txt Format:**
+```
+https://example.com/updates/video1|AMAZING VIDEO
+https://example.com/updates/video2|AMAZING VIDEO UPDATE 123
+https://example.com/updates/video3|ANOTHER VIDEO
 ```
 
 ## Step 4: Jellyfin Library Setup

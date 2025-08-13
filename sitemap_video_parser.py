@@ -74,15 +74,15 @@ def setup_headless_browser():
         return None
 
 def crawl_updates_pages(domain):
-    """Crawl /updates/ pages to find all current video URLs"""
-    log_with_timestamp("🕷️  Starting crawling of /updates/ pages")
+    """Crawl /updates/ pages to find all current video URLs and extract titles"""
+    log_with_timestamp("🕷️  Starting crawling of /updates/ pages with title extraction")
     
     driver = setup_headless_browser()
     if not driver:
         log_with_timestamp("Failed to setup browser for crawling")
         return []
     
-    all_video_urls = []
+    all_video_data = []  # Changed to store both URL and title
     base_updates_url = f"{domain}/updates"
     
     try:
@@ -103,26 +103,26 @@ def crawl_updates_pages(domain):
                 driver.get(page_url)
                 time.sleep(2)
                 
-                # Extract video URLs from this page
-                video_urls = extract_video_urls_from_page(driver, domain)
-                all_video_urls.extend(video_urls)
+                # Extract video URLs and titles from this page
+                video_data = extract_video_data_from_page(driver, domain)
+                all_video_data.extend(video_data)
                 
-                log_with_timestamp(f"  Found {len(video_urls)} videos on this page")
+                log_with_timestamp(f"  Found {len(video_data)} videos on this page")
                 
             except Exception as e:
                 log_with_timestamp(f"  Error crawling page: {e}")
                 continue
         
-        # Remove duplicates while preserving order
-        unique_urls = []
-        seen = set()
-        for url in all_video_urls:
-            if url not in seen:
-                unique_urls.append(url)
-                seen.add(url)
+        # Remove duplicate URLs while preserving order
+        unique_data = []
+        seen_urls = set()
+        for data in all_video_data:
+            if data['url'] not in seen_urls:
+                unique_data.append(data)
+                seen_urls.add(data['url'])
         
-        log_with_timestamp(f"🎯 Crawling complete: found {len(unique_urls)} unique video URLs")
-        return unique_urls
+        log_with_timestamp(f"🎯 Crawling complete: found {len(unique_data)} unique video URLs")
+        return unique_data
         
     finally:
         driver.quit()
@@ -252,9 +252,9 @@ def get_pagination_urls(driver, base_url):
         log_with_timestamp(f"⚠️  Error finding pagination: {e}")
         return pagination_urls
 
-def extract_video_urls_from_page(driver, domain):
-    """Extract individual video page URLs from an updates listing page"""
-    video_urls = []
+def extract_video_data_from_page(driver, domain):
+    """Extract individual video page URLs and titles from an updates listing page"""
+    video_data = []
     
     # Try multiple selectors to find video links
     selectors_to_try = [
@@ -285,27 +285,113 @@ def extract_video_urls_from_page(driver, domain):
                             
                             # Avoid duplicate main updates page
                             if not href.endswith(("/updates", "/updates/")):
-                                video_urls.append(href)
+                                # Try to extract title from the element
+                                title = None
+                                
+                                # Try various ways to get the title
+                                try:
+                                    # Try title attribute first
+                                    title = element.get_attribute("title")
+                                    if not title:
+                                        # Try alt attribute of image inside
+                                        img = element.find_element(By.TAG_NAME, "img")
+                                        title = img.get_attribute("alt")
+                                    if not title:
+                                        # Try text content
+                                        title = element.text.strip()
+                                    if not title:
+                                        # Try aria-label
+                                        title = element.get_attribute("aria-label")
+                                        
+                                    # Clean the title if we found one
+                                    if title:
+                                        title = title.strip()
+                                        # Remove newlines and extra spaces
+                                        title = re.sub(r'\s+', ' ', title)
+                                        # Remove invalid filename characters
+                                        title = re.sub(r'[<>:"/\\|?*]', '', title)
+                                        
+                                except Exception:
+                                    title = None
+                                
+                                video_data.append({
+                                    'url': href,
+                                    'title': title,
+                                    'url_title': None  # Will be filled if needed for duplicates
+                                })
                     except Exception as e:
                         continue
                 break  # Use first working selector
         except Exception as e:
             continue
     
-    # Remove duplicates
-    unique_urls = list(set(video_urls))
-    return unique_urls
+    return video_data
 
-def write_list_file(urls, output_file='list_video.txt'):
-    """Write URLs to list_video.txt file"""
+def create_url_title(url):
+    """Create a title from URL when duplicates are detected"""
     try:
-        log_with_timestamp(f"Writing {len(urls)} URLs to {output_file}")
+        # Extract the part after /updates/
+        if "/updates/" in url:
+            url_part = url.split("/updates/")[1]
+            # Remove any trailing slashes and parameters
+            url_part = url_part.split('?')[0].rstrip('/')
+            # Convert hyphens to spaces and make uppercase
+            url_title = url_part.replace('-', ' ').upper()
+            return url_title
+    except Exception:
+        pass
+    return None
+
+def detect_and_handle_duplicates(video_data):
+    """Detect duplicate titles and assign URL-based titles where needed"""
+    log_with_timestamp("🔍 Checking for duplicate titles...")
+    
+    # Count titles
+    title_counts = {}
+    for data in video_data:
+        title = data['title']
+        if title:  # Only count non-empty titles
+            title_lower = title.lower()
+            if title_lower not in title_counts:
+                title_counts[title_lower] = []
+            title_counts[title_lower].append(data)
+    
+    # Find duplicates
+    duplicates_found = 0
+    for title_lower, entries in title_counts.items():
+        if len(entries) > 1:
+            duplicates_found += len(entries)
+            log_with_timestamp(f"  🔄 Duplicate title found: '{entries[0]['title']}' ({len(entries)} videos)")
+            
+            # Assign URL-based titles to all duplicates
+            for entry in entries:
+                url_title = create_url_title(entry['url'])
+                if url_title:
+                    entry['url_title'] = url_title
+                    log_with_timestamp(f"    • {entry['url']} -> '{url_title}'")
+                else:
+                    log_with_timestamp(f"    • {entry['url']} -> Could not create URL title")
+    
+    if duplicates_found > 0:
+        log_with_timestamp(f"✅ Processed {duplicates_found} duplicate titles")
+    else:
+        log_with_timestamp("✅ No duplicate titles found")
+    
+    return video_data
+
+def write_list_file(video_data, output_file='list_video.txt'):
+    """Write video data to list_video.txt file with format: URL|TITLE"""
+    try:
+        log_with_timestamp(f"Writing {len(video_data)} video entries to {output_file}")
         
         with open(output_file, 'w', encoding='utf-8') as f:
-            for url in urls:
-                f.write(url + '\n')
+            for data in video_data:
+                url = data['url']
+                # Use URL title if available (for duplicates), otherwise use normal title
+                title = data.get('url_title') or data.get('title') or ''
+                f.write(f"{url}|{title}\n")
         
-        log_with_timestamp(f"Successfully wrote URLs to {output_file}")
+        log_with_timestamp(f"Successfully wrote video data to {output_file}")
         return True
         
     except Exception as e:
@@ -314,15 +400,15 @@ def write_list_file(urls, output_file='list_video.txt'):
 
 def main():
     """Main function"""
-    log_with_timestamp("Starting video URL parser...")
+    log_with_timestamp("Starting video URL parser with title extraction...")
     
     # Get user input for domain
     domain = get_user_inputs()
     
-    # Crawl /updates/ pages to find all video URLs
-    video_urls = crawl_updates_pages(domain)
+    # Crawl /updates/ pages to find all video URLs and titles
+    video_data = crawl_updates_pages(domain)
     
-    if not video_urls:
+    if not video_data:
         log_with_timestamp("❌ No video URLs found")
         log_with_timestamp("💡 Possible solutions:")
         log_with_timestamp("   • Check if the domain is correct")
@@ -330,10 +416,13 @@ def main():
         log_with_timestamp("   • Check if there are any videos on the site")
         sys.exit(1)
     
+    # Detect and handle duplicate titles
+    video_data = detect_and_handle_duplicates(video_data)
+    
     # Write to list_video.txt
-    if write_list_file(video_urls):
-        log_with_timestamp("✅ Video URL extraction completed successfully!")
-        log_with_timestamp(f"Found and saved {len(video_urls)} video URLs")
+    if write_list_file(video_data):
+        log_with_timestamp("✅ Video URL and title extraction completed successfully!")
+        log_with_timestamp(f"Found and saved {len(video_data)} video entries")
         log_with_timestamp(f"Next step: Run 'python3 download.py' to download the videos")
     else:
         log_with_timestamp("❌ Failed to write video list file")
