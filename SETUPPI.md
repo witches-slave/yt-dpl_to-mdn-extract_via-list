@@ -286,9 +286,6 @@ sudo sync
 4. **Create mount points**:
    ```bash
    sudo mkdir -p /media/jellyfin
-   sudo mkdir -p /media/jellyfin/videos
-   sudo mkdir -p /media/jellyfin/config
-   sudo mkdir -p /media/jellyfin/cache
    ```
 
 5. **Get UUID of the drive**:
@@ -349,33 +346,16 @@ cd /media/jellyfin
 
 # Check what's already there
 ls -la
-
-# Your existing source folders should already be here (sourcefolder, sourcefolder2, etc.)
-# No need to create additional directories - tag_organizer.py will create the tags/ structure
-
-# Only create transcoding directory (optional - only if SD space is limited)
-mkdir -p transcodes
 ```
 
-**If starting with a clean drive:**
-```bash
-# Create basic structure (adjust folder names to match your media collection)
-mkdir -p /media/jellyfin/sourcefolder
-mkdir -p /media/jellyfin/sourcefolder2
-mkdir -p /media/jellyfin/movies
-
-# Create transcoding directory (optional)
-mkdir -p /media/jellyfin/transcodes
-
-# Note: tags/ directory will be created automatically by tag_organizer.py
-```
 
 **Example final structure with existing media:**
 ```
 SD Card (fast):
-├── /var/lib/jellyfin/          # Jellyfin config & database (keep here!)
-├── /var/cache/jellyfin/        # Jellyfin cache (keep here for speed)
-└── /var/log/jellyfin/          # Jellyfin logs (keep here)
+├── /var/lib/jellyfin/          # Jellyfin config & database
+├── /var/cache/jellyfin/        # Jellyfin cache
+├── /var/log/jellyfin/          # Jellyfin logs
+└── /tmp/jellyfin/              # Jellyfin transcoding (default location)
 
 External NTFS Drive (large storage):
 /media/jellyfin/
@@ -383,65 +363,66 @@ External NTFS Drive (large storage):
 ├── sourcefolder2/              # More existing media folders
 ├── sourcefolder3/              # More existing media folders
 ├── movies/                     # Your existing movies (if any)
-├── tags/                       # Created by tag_organizer.py with symlinks
-│   ├── tag [TagName]/          # Symlinks to videos with this tag
-│   ├── model [ModelName]/      # Symlinks to videos with this model
-│   ├── tag no tag/             # Videos without tags
-│   └── source [foldername]/    # All videos from each source folder
-└── transcodes/                 # Temporary transcoding files (optional)
+└── tags/                       # Created by tag_organizer.py with symlinks
+    ├── tag [TagName]/          # Symlinks to videos with this tag
+    ├── model [ModelName]/      # Symlinks to videos with this model
+    ├── tag no tag/             # Videos without tags
+    └── source [foldername]/    # All videos from each source folder
 ```
-
-**🚀 Performance Rationale:**
-- **SD Card (fast random access)**: Jellyfin database, config, cache for instant UI response
-- **External NTFS Drive (large capacity)**: Media files only - sequential reads are fine
-- **NTFS compatibility**: Works perfectly with Jellyfin, maintains Windows compatibility
-- **Network streaming**: NTFS read performance is excellent for video streaming
-- **Symlinks organization**: tag_organizer.py creates organized symlinks without moving files
 
 ---
 
 ## Jellyfin Installation
 
-### Step 1: Install Jellyfin Repository
+### Step 1: Install Jellyfin (Official Method)
 
-1. **Add Microsoft package repository** (required for .NET):
+**Jellyfin provides an automated installation script for Ubuntu/Debian systems:**
+
+1. **Install Jellyfin using the official script** (recommended):
    ```bash
-   wget https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
-   sudo dpkg -i packages-microsoft-prod.deb
-   sudo apt update
+   # Download and run the official Jellyfin installation script
+   curl https://repo.jellyfin.org/install-debuntu.sh | sudo bash
    ```
 
-2. **Add Jellyfin repository**:
+   **Optional: Verify script integrity** (recommended for security):
    ```bash
+   # Download script and verify checksum
+   curl -s https://repo.jellyfin.org/install-debuntu.sh -o install-debuntu.sh
+   diff <( sha256sum install-debuntu.sh ) <( curl -s https://repo.jellyfin.org/install-debuntu.sh.sha256sum )
+   
+   # If output is empty, integrity is verified. Inspect script (optional):
+   less install-debuntu.sh
+   
+   # Run the verified script:
+   sudo bash install-debuntu.sh
+   ```
+
+2. **Alternative: Manual repository setup** (if you prefer manual control):
+   ```bash
+   # Add Jellyfin repository manually
    curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/jellyfin.gpg
    echo "deb [arch=$( dpkg --print-architecture )] https://repo.jellyfin.org/ubuntu jammy main" | sudo tee /etc/apt/sources.list.d/jellyfin.list
-   ```
-
-3. **Update package list**:
-   ```bash
+   
+   # Update package list and install
    sudo apt update
-   ```
-
-### Step 2: Install Jellyfin and Dependencies
-
-1. **Install Jellyfin**:
-   ```bash
    sudo apt install -y jellyfin
    ```
 
-2. **Install additional multimedia packages**:
+### Step 2: Install Additional Dependencies
+
+**Note**: If you used the official Jellyfin script above, Jellyfin is already installed. This step adds multimedia and hardware acceleration support.
+
+1. **Install multimedia and hardware acceleration packages**:
    ```bash
-   # Hardware acceleration and codec support
+   # Hardware acceleration and codec support for Raspberry Pi 5
    sudo apt install -y \
      vainfo \
-     intel-media-va-driver-non-free \
      mesa-va-drivers \
      ffmpeg \
-     libavcodec-extra \
-     intel-opencl-icd
+     libavcodec-extra
    ```
 
-3. **Add jellyfin user to video group** (for hardware acceleration):
+2. **Add jellyfin user to video groups** (for hardware acceleration):
    ```bash
    sudo usermod -aG video jellyfin
    sudo usermod -aG render jellyfin
@@ -458,17 +439,12 @@ External NTFS Drive (large storage):
 
 2. **Configure directories for optimal performance**:
    ```bash
-   # Keep Jellyfin config/database on fast SD card (default location is fine)
-   # Only create a custom transcode directory on external drive if you have limited SD space
-   
-   # Create transcode directory on external drive (optional - see note below)
-   sudo mkdir -p /media/jellyfin/transcodes
-   sudo chown -R jellyfin:jellyfin /media/jellyfin/transcodes
+   # Keep Jellyfin config/database/cache/transcodes on fast SD card (default locations)
+   # External drive is only for media files
    ```
 
    **Performance Note**: 
-   - **Keep on SD card**: Configuration, database, cache (for fastest access)
-   - **Move to external**: Only transcoding temp files (if SD card space is limited)
+   - **Keep on SD card**: Configuration, database, cache, and transcoding (for fastest access)
    - **External drive**: Media files only
 
 3. **Create optimal Jellyfin service configuration**:
@@ -481,19 +457,8 @@ External NTFS Drive (large storage):
    [Service]
    # Increase file limits
    LimitNOFILE=65536
-   # Custom transcode directory (optional - only if SD space is limited)
-   Environment="JELLYFIN_TRANSCODE_DIR=/media/jellyfin/transcodes"
    # Performance optimizations
    Environment="JELLYFIN_FFMPEG_ARGS=-threads 4 -thread_queue_size 512"
-   ```
-
-   **Alternative for limited SD space** - move cache to external drive:
-   ```bash
-   # ONLY if your SD card is running low on space
-   sudo systemctl stop jellyfin
-   sudo mv /var/cache/jellyfin /media/jellyfin/cache/jellyfin
-   sudo ln -s /media/jellyfin/cache/jellyfin /var/cache/jellyfin
-   sudo chown -R jellyfin:jellyfin /media/jellyfin/cache/jellyfin
    ```
 
 4. **Start and enable Jellyfin**:
@@ -511,203 +476,216 @@ External NTFS Drive (large storage):
 
 2. **Complete initial setup**:
    - Create admin account
-   - Add media libraries pointing to `/media/jellyfin/videos/`
+   - Add media libraries pointing to `/media/jellyfin/sourcefolder`, `/media/jellyfin/sourcefolder2`, etc.
    - Configure hardware acceleration (Settings → Playback → Hardware acceleration: Video Acceleration API (VAAPI))
-   - Set transcode directory: `/media/jellyfin/transcodes`
+   - Transcoding will use default SD card location (optimal for 128GB SD card)
 
 ---
 
 ## Integration with Tag Organization System
 
-### Step 1: Install Dependencies for Tag Organizer
+**Important Note**: All script-related setup (Python environment, dependencies, downloading, and tag organization) should be done on your **development machine**. The Pi serves only as a media server. Refer to the main `README.md` for complete setup instructions for the download and organization scripts.
 
-```bash
-# Install Python and dependencies
-sudo apt install -y python3 python3-pip python3-venv
+### Step 1: Development Machine Setup (Primary Workflow)
 
-# Install Chrome and dependencies (for tag_organizer.py)
-wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-echo "deb [arch=arm64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-sudo apt update
-sudo apt install -y google-chrome-stable
+**On your development machine** (Windows/Linux/macOS), follow the setup instructions in the main `README.md` file to:
 
-# System dependencies for Selenium
-sudo apt install -y \
-    fonts-liberation \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libatspi2.0-0 \
-    libcups2 \
-    libdbus-1-3 \
-    libdrm2 \
-    libgtk-3-0 \
-    libnspr4 \
-    libnss3 \
-    libwayland-client0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxkbcommon0 \
-    libxrandr2 \
-    xdg-utils \
-    libu2f-udev \
-    libvulkan1
-```
+1. ✅ **Install Python environment and dependencies** (Chrome, Selenium, etc.)
+2. ✅ **Setup the download scripts** (`download.py`, parsers, etc.)
+3. ✅ **Configure tag organization** (`tag_organizer.py`, `list_tag.txt`)
+4. ✅ **Download and organize videos** directly to your NTFS media drive
 
-### Step 2: Setup Tag Organization Environment
+### Step 2: Media Organization Workflow
 
-1. **Create organization directory**:
+**Recommended Workflow** (all done on development machine):
+
+1. **Connect NTFS drive** to your development machine (USB, external dock, etc.)
+
+2. **Download videos** using your existing scripts:
    ```bash
-   mkdir -p /media/jellyfin/scripts
-   cd /media/jellyfin/scripts
-   ```
-
-2. **Create Python virtual environment**:
-   ```bash
-   python3 -m venv venv
+   # On your development machine (follow README.md setup)
+   cd /path/to/your/scripts
    source venv/bin/activate
+   python3 download.py
    ```
 
-3. **Install Python packages**:
+3. **Organize with symlinks** using the updated tag_organizer.py:
    ```bash
-   pip install --upgrade pip
-   pip install "blinker<1.8" && \
-   pip install selenium-wire && \
-   pip install webdriver-manager && \
-   pip install requests && \
-   pip install setuptools
+   # tag_organizer.py now creates relative symlinks for portability
+   python3 tag_organizer.py
+   # When prompted, select your NTFS drive's media folder
+   # Script creates: tags/, model/, source/ folders with relative symlinks
    ```
 
-4. **Copy tag organization scripts**:
-   ```bash
-   # Copy from your development machine (adjust paths as needed)
-   scp username@your-dev-machine:/path/to/scripts/tag_organizer.py .
-   scp username@your-dev-machine:/path/to/scripts/list_tag.txt .
-   chmod +x *.py
-   ```
+4. **Transfer to Pi**: Simply connect the organized NTFS drive to your Pi
+   - All symlinks work immediately (they're relative paths within the drive)
+   - No re-processing needed on the Pi
 
-### Step 3: Configure Tag Organizer for Pi
+### Step 3: Pi Configuration for Media Access
 
-1. **Create organization script**:
+**On the Pi** (minimal setup - no scripts needed):
+
+1. **No script dependencies required** - the Pi only serves pre-organized media
+
+2. **Setup automatic library refresh** (optional):
    ```bash
-   nano organize_tags.sh
+   # Create simple refresh script (optional)
+   nano /home/ubuntu/refresh_jellyfin.sh
    ```
    Add:
    ```bash
    #!/bin/bash
-   cd /media/jellyfin/scripts
-   source venv/bin/activate
-   
-   echo "Starting tag organization process..."
-   echo "This will create symlinks in /media/jellyfin/tags/ pointing to your source folders"
-   
-   # Run tag organizer (it will prompt for source folder selection)
-   python3 tag_organizer.py
-   
-   echo "Updating Jellyfin library..."
+   echo "Refreshing Jellyfin library..."
    curl -X POST "http://localhost:8096/Library/Refresh" \
         -H "X-Emby-Authorization: MediaBrowser Token=YOUR_API_TOKEN"
+   echo "Library refresh triggered"
    ```
 
-2. **Make script executable**:
    ```bash
-   chmod +x organize_tags.sh
+   chmod +x /home/ubuntu/refresh_jellyfin.sh
    ```
 
-### Step 4: Setup Automated Library Refresh
-
-1. **Create Jellyfin API token**:
+3. **Create Jellyfin API token** (if using refresh script):
    - Go to Jellyfin Dashboard → API Keys
-   - Create new API key
-   - Note the token for use in scripts
+   - Create new API key for library refresh
+   - Update the refresh script with your token
 
-2. **Update the organize_tags.sh script** with your API token:
-   ```bash
-   nano organize_tags.sh
-   # Replace YOUR_API_TOKEN with your actual token
+### Step 4: Jellyfin Library Configuration
+
+**Understanding the Tag Organization System:**
+
+The `tag_organizer.py` script creates a sophisticated folder structure using symlinks to organize your videos without duplicating files. Here's how it works:
+
+1. **Source videos** remain in their original download folders (e.g., `sourcefolder/`, `sourcefolder2/`)
+2. **Symlinks** are created in the `tags/` folder pointing to the original files
+3. **Organization structure** created by tag_organizer.py:
+
+```
+/media/jellyfin/
+├── sourcefolder/               # Original downloaded videos
+├── sourcefolder2/              # More original videos
+├── movies/                     # Movies (if any)
+└── tags/                       # Organized symlinks (created by tag_organizer.py)
+    ├── tag [TagName]/          # Videos with specific tags (e.g., "tag BDSM")
+    ├── model [ModelName]/      # Videos featuring specific models (e.g., "model Jane Doe")
+    ├── tag no tag/             # Videos without any tags
+    └── source [foldername]/    # All videos from each source folder
+```
+
+**Setting up Jellyfin Libraries:**
+
+1. **Add media libraries in Jellyfin** based on how you want to browse:
+
+   **Option A: Browse by Source + Organized Tags (Recommended)**
    ```
-
-### Step 5: Running Tag Organization
-
-**Flexible Deployment**: The tag_organizer.py script can be run either on the Pi or on your development machine, as long as the symlinks stay within the same drive/filesystem.
-
-**Option A: Run on Development Machine** (Recommended for convenience):
-```bash
-# On your development machine where you have the download scripts
-cd /path/to/your/scripts
-source venv/bin/activate
-
-# Mount or access the NTFS drive (e.g., via network share, direct USB connection, etc.)
-# Make sure tag_organizer.py points to the correct paths on the drive
-
-python3 tag_organizer.py
-# When prompted for source folder, select the path to your media on the NTFS drive
-# The script will create symlinks that stay within the same filesystem
-```
-
-**Option B: Run on Pi** (Original approach):
-```bash
-cd /media/jellyfin/scripts
-./organize_tags.sh
-```
-
-**Key Points for Cross-Machine Symlink Creation:**
-- ✅ **Symlinks work**: As long as source and target are on the same filesystem
-- ✅ **Relative paths**: The script can use relative paths that work on both systems
-- ✅ **NTFS compatibility**: NTFS supports symlinks when created properly
-- ✅ **No network crossing**: All symlinks stay within the NTFS drive
-
-**Example workflow:**
-1. **Download videos** on your development machine
-2. **Save directly to NTFS drive** (mounted via USB or network)
-3. **Run tag_organizer.py** on development machine pointing to NTFS drive
-4. **Transfer/connect NTFS drive** to Pi
-5. **Symlinks work immediately** on Pi since they're relative to the drive
-
-The script will:
-- Prompt you to select your media source folder (e.g., `E:\sourcefolder` on Windows or `/mnt/usb/sourcefolder` on Linux)
-- Read `list_tag.txt` to get tag/model URLs
-- Crawl each tag/model page to find associated videos
-- Create organized symlinks in the `tags/` folder on the same drive
-- Structure: `tag [TagName]/`, `model [ModelName]/`, `tag no tag/`, `source [foldername]/`
-
-### Step 6: Jellyfin Library Configuration
-
-1. **Add media libraries in Jellyfin**:
-   - **Source Media**: Point to `/media/jellyfin/sourcefolder`, `/media/jellyfin/sourcefolder2`, etc.
-   - **Organized Tags**: Point to `/media/jellyfin/tags/` for browsing by tags/models
-   - **Movies**: Point to `/media/jellyfin/movies/` if you have movies
+   Library Name: "Source Videos"
+   Content Type: Movies or Shows
+   Folder: /media/jellyfin/sourcefolder
+            /media/jellyfin/sourcefolder2
+            (add all your source folders)
+   
+   Library Name: "By Tags"  
+   Content Type: Movies or Shows
+   Folder: /media/jellyfin/tags/tag*/
+   
+   Library Name: "By Models"
+   Content Type: Movies or Shows  
+   Folder: /media/jellyfin/tags/model*/
+   
+   Library Name: "Untagged Videos"
+   Content Type: Movies or Shows
+   Folder: /media/jellyfin/tags/tag no tag/
+   ```
 
 2. **Library settings**:
    - Enable "Real-time monitoring" for automatic updates
    - Set content type appropriately for each library
    - Configure metadata providers as needed
 
+**How the Tag Organization Works:**
+
+1. **Download Phase** (done on development machine):
+   - Videos are downloaded to source folders like `sourcefolder/`, `sourcefolder2/`
+   - Each video keeps its original filename and location
+
+2. **Organization Phase** (done on development machine):
+   - `tag_organizer.py` reads `list_tag.txt` (created by `sitemap_tag_parser.py`)
+   - Script crawls each tag/model page to find which videos belong to each tag
+   - Creates **relative symlinks** in `tags/` folder pointing to original videos
+   - No videos are moved or duplicated - only symlinks are created
+
+3. **Jellyfin Benefits**:
+   - **Browse by tag**: "BDSM", "Bondage", "Latex" etc. folders
+   - **Browse by model**: Individual model folders with their videos
+   - **Browse by source**: All videos from each download source
+   - **Find untagged**: Videos that don't have tags assigned
+   - **No duplicates**: Same video appears in multiple categories without using extra space
+
+**Example of what you'll see in Jellyfin:**
+```
+"By Tags" Library:
+├── tag BDSM/                   # 15 videos
+├── tag Bondage/                # 23 videos  
+├── tag Latex/                  # 8 videos
+└── tag no tag/                 # 5 videos
+
+"By Models" Library:
+├── model Jane Doe/             # 12 videos
+├── model Sarah Smith/          # 7 videos
+└── model Alex Johnson/         # 9 videos
+
+"Source Videos" Library:
+├── sourcefolder/               # 50 videos (originals)
+├── sourcefolder2/              # 30 videos (originals)
+└── movies/                     # 10 videos (originals)
+```
+
+All folders show the same videos, but organized differently for easy browsing!
+
 ### Workflow Summary
 
-**Your flexible workflow options:**
+**Your streamlined development workflow:**
 
-**Option A - Development Machine Organization (Most Convenient):**
-1. **Download videos** on your development machine using the download scripts
-2. **Save directly to NTFS drive** (connected via USB or network)
-3. **Run tag_organizer.py** on development machine pointing to the NTFS drive
-4. **Connect/transfer NTFS drive** to Pi
-5. **Jellyfin automatically detects** organized content via existing symlinks
+**All script work done on development machine** (following README.md setup):
 
-**Option B - Pi Organization (Original approach):**
-1. **Download videos** on your development machine using the download scripts
-2. **Transfer media** to the Pi's NTFS drive (via network copy, direct connection, etc.)
-3. **Run tag organization** on the Pi: `./organize_tags.sh`
-4. **Jellyfin automatically detects** new organized content via symlinks
+1. **Setup environment** on development machine (see README.md):
+   - Install Python, Chrome, Selenium dependencies
+   - Clone repository and setup virtual environment
+   - Configure download scripts and tag lists
 
-**Benefits of both approaches:**
-- ✅ **Symlinks work properly** (stay within same filesystem)
-- ✅ **No duplicate storage** (videos stay in source folders)
-- ✅ **Organized browsing** (by tags, models, etc.)
-- ✅ **NTFS compatibility** (symlinks work on Windows and Linux)
-- ✅ **Fast access** (Jellyfin config on SD card, media on NTFS drive)
-- ✅ **Flexible deployment** (organize wherever convenient)
+2. **Download and organize workflow**:
+   ```bash
+   # On development machine with NTFS drive connected
+   cd /path/to/yt-dpl_to-mdn-extract_via-list
+   source venv/bin/activate
+   
+   # Download videos to NTFS drive
+   python3 download.py
+   
+   # Organize with relative symlinks (portable across machines)
+   python3 tag_organizer.py
+   # When prompted, select your NTFS drive's media folder
+   ```
+
+3. **Deploy to Pi**:
+   - Connect organized NTFS drive to Pi
+   - Symlinks work immediately (relative paths within drive)
+   - Jellyfin serves pre-organized content
+
+**Pi's role** (minimal setup - no scripts):
+- ✅ **Media server only** - serves content via Jellyfin
+- ✅ **No Python dependencies** - no Chrome, Selenium, or scripts needed
+- ✅ **No download/organization** - content arrives pre-organized
+- ✅ **Fast SD card storage** - for Jellyfin config and database only
+- ✅ **Large NTFS storage** - for media files and symlink organization
+
+**Benefits of this approach:**
+- ✅ **Clean separation** - development machine does the work, Pi serves content
+- ✅ **Relative symlinks** - portable between machines and mount points
+- ✅ **No duplicate setup** - scripts run where you already have them configured
+- ✅ **Pi stays lightweight** - no heavy dependencies or processing
+- ✅ **Flexible workflow** - organize content anywhere, serve from Pi
+- ✅ **Development environment** - use your familiar setup for downloads/organization
 
 ---
 
@@ -729,18 +707,11 @@ The script will:
 
 ### Step 2: Transcoding Optimization
 
-1. **Create tmpfs for transcoding** (uses RAM for faster transcoding):
+1. **Transcoding uses SD card by default** (fastest option with 128GB storage):
    ```bash
-   sudo nano /etc/fstab
-   ```
-   Add:
-   ```
-   tmpfs /media/jellyfin/transcodes tmpfs defaults,noatime,size=2G 0 0
-   ```
-
-2. **Mount tmpfs**:
-   ```bash
-   sudo mount -a
+   # Jellyfin uses /tmp/jellyfin/ by default for transcoding
+   # This is already on your fast SD card - no changes needed
+   # 128GB SD card provides plenty of space for temporary transcoding files
    ```
 
 ### Step 3: Network Optimization
@@ -949,33 +920,25 @@ cd /media/jellyfin/scripts
 
 ---
 
-## Conclusion
+### Streamlined Workflow:
 
-Your Raspberry Pi 5 is now configured as a powerful Jellyfin media server with:
+**Development Machine** (where all the work happens):
+1. ✅ **Setup scripts** following the main `README.md` instructions
+2. ✅ **Download videos** using your configured download scripts  
+3. ✅ **Organize with relative symlinks** using updated `tag_organizer.py`
+4. ✅ **Content ready** - NTFS drive contains organized media with portable symlinks
 
-✅ **Ubuntu Server 24.04 LTS** - Stable, long-term support OS  
-✅ **Hardware-accelerated transcoding** - Smooth playback on all devices  
-✅ **External NTFS storage** - Your existing media collection preserved  
-✅ **Tag organization system** - Automated symlink organization via tag_organizer.py  
-✅ **Security hardening** - Protected against common threats  
-✅ **Performance optimized** - Configured for smooth media streaming  
-✅ **Remote access capable** - Access your media from anywhere  
+**Raspberry Pi** (clean media server):
+1. ✅ **Connect NTFS drive** → Content immediately available
+2. ✅ **No script dependencies** → Clean, lightweight server
+3. ✅ **Relative symlinks work** → No path adjustments needed
+4. ✅ **Ready to serve** → Browse organized content in Jellyfin
 
-### Your Workflow Options:
-**Option A (Most Convenient):**
-1. **Download videos** on your development machine
-2. **Save directly to NTFS drive** (USB/network connected)
-3. **Run tag_organizer.py** on development machine
-4. **Connect NTFS drive** to Pi → **Ready to serve!**
+**Key Advantages:**
+- 🚀 **Separation of concerns** - Development machine handles processing, Pi handles serving
+- 🔄 **Portable symlinks** - Content works on any machine, any mount point  
+- ⚡ **Optimal performance** - Pi focuses only on media streaming
+- 🛠️ **Familiar environment** - Use your existing development setup
+- 📦 **Pre-organized content** - Pi receives ready-to-serve media
 
-**Option B (Pi-based):**
-1. **Download videos** on your development machine
-2. **Transfer media files** to Pi's NTFS drive
-3. **Run tag organization** on Pi: `./organize_tags.sh`
-4. **Browse organized content** in Jellyfin
-
-Your server is ready to serve your media collection with automatic organization through symlinks - created wherever it's most convenient for you!
-
----
-
-**Setup complete!** Your Raspberry Pi 5 Jellyfin server is ready to serve your media collection across your network.
+Your server is ready to serve your media collection with zero script setup on the Pi - all the heavy lifting is done on your development machine with the familiar environment described in `README.md`!
