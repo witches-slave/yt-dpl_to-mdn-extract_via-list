@@ -582,7 +582,7 @@ def extract_title_and_manifest_url(driver, page_url, domain):
         del driver.requests
         
         # Load the page once
-        log_with_timestamp(f"Loading page: {page_url}")
+        log_with_timestamp(f"🔄 Loading page for title and manifest extraction: {page_url}")
         driver.get(page_url)
         
         # Wait for page to load using WebDriverWait
@@ -614,16 +614,16 @@ def extract_title_and_manifest_url(driver, page_url, domain):
                 video_title = re.sub(r'[<>:"/\\|?*]', '', video_title)
                 video_title = video_title.replace('\n', ' ').replace('\r', ' ')
                 video_title = ' '.join(video_title.split())  # Remove extra whitespace
-                log_with_timestamp(f"Found video title: {video_title}")
+                log_with_timestamp(f"📝 Extracted video title: {video_title}")
             else:
-                log_with_timestamp("Could not extract video title - h1 element is empty")
+                log_with_timestamp("❌ Could not extract video title - h1 element is empty")
                 return None, None, False
         except Exception as e:
-            log_with_timestamp(f"Could not extract video title: {e}")
+            log_with_timestamp(f"❌ Could not extract video title: {e}")
             return None, None, False
         
         # Now extract manifest URL from the same page load
-        log_with_timestamp("Extracting manifest URL from same page...")
+        log_with_timestamp("🎥 Triggering video player for manifest URL...")
         
         # Try to trigger video player by looking for and clicking play button
         try:
@@ -649,7 +649,7 @@ def extract_title_and_manifest_url(driver, page_url, domain):
             pass
         
         # Wait and monitor for authenticated URLs
-        log_with_timestamp("Waiting for video player to load and authenticate...")
+        log_with_timestamp("🔍 Monitoring for authenticated manifest URL...")
         
         authenticated_url = None
         basic_url = None
@@ -664,11 +664,11 @@ def extract_title_and_manifest_url(driver, page_url, domain):
                         if '/manifest/video.mpd' in url:
                             if 'auth=' in url or 'token=' in url or 'key=' in url or 'signature=' in url:
                                 authenticated_url = url
-                                log_with_timestamp(f"✓ Found authenticated manifest URL")
+                                log_with_timestamp(f"🔐 Found authenticated manifest URL")
                                 break
                             elif not basic_url:
                                 basic_url = url
-                                log_with_timestamp(f"Found basic manifest URL")
+                                log_with_timestamp(f"🎬 Found basic manifest URL")
                 
                 if authenticated_url:
                     break
@@ -681,14 +681,14 @@ def extract_title_and_manifest_url(driver, page_url, domain):
         manifest_url = authenticated_url or basic_url
         
         if manifest_url:
-            log_with_timestamp(f"✓ Successfully extracted manifest URL")
+            log_with_timestamp(f"✅ Single page load complete - extracted both title and manifest URL")
             return manifest_url, video_title, False
         else:
-            log_with_timestamp("⚠ Could not find manifest URL")
+            log_with_timestamp("⚠ Could not find manifest URL in captured requests")
             return None, video_title, False
             
     except Exception as e:
-        log_with_timestamp(f"Error in combined extraction: {e}")
+        log_with_timestamp(f"❌ Error in optimized extraction: {e}")
         return None, None, False
 
 def extract_video_title_only(driver, page_url, domain):
@@ -1076,14 +1076,14 @@ def main():
                 video_title = None  # No title extraction for direct manifest URLs
             else:
                 # Page URL - OPTIMIZATION: Extract title and manifest URL in single page load
-                log_with_timestamp("Page URL detected, extracting title and manifest URL...")
+                log_with_timestamp("Page URL detected, processing video page...")
                 if not driver:
                     # This shouldn't happen as we check for page URLs above
                     log_with_timestamp("Error: Need authentication but no driver available")
                     i += 1
                     continue
                 
-                # Extract both title and manifest URL in a single page load
+                # Extract both title and manifest URL in a single page load (OPTIMIZED)
                 manifest_url, video_title, is_redirect = extract_title_and_manifest_url(driver, url, domain)
                 
                 if is_redirect:
@@ -1101,10 +1101,12 @@ def main():
                 
                 # If we got here, file doesn't exist and we should have manifest_url
                 if not manifest_url:
-                    log_with_timestamp("Failed to extract manifest URL, skipping...")
+                    log_with_timestamp("⚠ Could not extract manifest URL, skipping video")
                     log_separator()
                     i += 1
                     continue
+                
+                log_with_timestamp("✓ Ready to download - both title and manifest URL extracted")
             
             if manifest_url:
                 # Check if there's enough storage space before downloading
