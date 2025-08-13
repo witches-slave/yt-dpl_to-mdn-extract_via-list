@@ -556,18 +556,16 @@ def create_symlink_safe(target_path, link_path):
         if os.path.exists(link_path) or os.path.islink(link_path):
             os.remove(link_path)
         
+        # Calculate relative path from link to target for portability
+        relative_target = os.path.relpath(target_path, os.path.dirname(link_path))
+        
         # Try creating symlink first
         try:
-            os.symlink(target_path, link_path)
+            os.symlink(relative_target, link_path)
             return True, "symlink"
         except OSError:
             # Fallback to hard link for NTFS/Windows compatibility
-            try:
-                os.link(target_path, link_path)
-                return True, "hardlink"
-            except OSError:
-                log_with_timestamp(f"   ⚠️ Failed to create link for {os.path.basename(target_path)}")
-                return False, "failed"
+            log_with_timestamp("❌ Symlink creation failed")
                 
     except Exception as e:
         log_with_timestamp(f"   ❌ Error creating link: {e}")

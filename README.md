@@ -122,7 +122,7 @@ Install the required Python packages with compatible versions:
 ```bash
 # Install main dependencies for the download script
 # Note: selenium-wire has compatibility issues with newer blinker versions
-pip install "blinker<1.8" && pip install selenium-wire && pip install webdriver-manager && pip install yt-dlp && pip install requests
+pip install "blinker<1.8" && pip install selenium-wire && pip install webdriver-manager && pip install yt-dlp && pip install requests && pip install setuptools
 
 # Note: selenium is included with selenium-wire
 # Note: xml.etree.ElementTree is part of Python standard library

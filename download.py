@@ -776,7 +776,7 @@ def run_yt_dlp(manifest_url, cookie, video_title=None, domain=None, output_folde
     
     cmd = [
         "yt-dlp",
-        "--concurrent-fragments", "4",
+        "--concurrent-fragments", "8",
         "--fragment-retries", "1",
         "--abort-on-error"
     ]
