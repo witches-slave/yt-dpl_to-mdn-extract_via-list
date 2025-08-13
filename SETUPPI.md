@@ -612,9 +612,17 @@ The `tag_organizer.py` script creates a sophisticated folder structure using sym
    - `tag_organizer.py` reads `list_tag.txt` (created by `sitemap_tag_parser.py`)
    - Script crawls each tag/model page to find which videos belong to each tag
    - Creates **relative symlinks** in `tags/` folder pointing to original videos
+   - **Downloads model preview images** automatically (only for model folders, not tag folders)
+   - **Creates NFO metadata files** for each video with all its tags for Jellyfin filtering
    - No videos are moved or duplicated - only symlinks are created
 
-3. **Jellyfin Benefits**:
+3. **Enhanced Metadata Features**:
+   - **Model folder images**: Automatically downloads and saves model photos as `folder.jpg` for visual browsing
+   - **Tag folders**: No preview images (as requested) - clean text-based organization
+   - **Video NFO files**: Each video gets an NFO file listing all its tags for advanced Jellyfin filtering
+   - **Jellyfin tag filtering**: Use Jellyfin's built-in tag filter to find videos by multiple criteria
+
+4. **Jellyfin Benefits**:
    - **Browse by tag**: "BDSM", "Bondage", "Latex" etc. folders
    - **Browse by model**: Individual model folders with their videos
    - **Browse by source**: All videos from each download source
@@ -624,21 +632,34 @@ The `tag_organizer.py` script creates a sophisticated folder structure using sym
 **Example of what you'll see in Jellyfin:**
 ```
 "By Tags" Library:
-├── tag BDSM/                   # 15 videos
-├── tag Bondage/                # 23 videos  
-├── tag Latex/                  # 8 videos
-└── tag no tag/                 # 5 videos
+├── tag BDSM/                   # 15 videos (no folder image)
+├── tag Bondage/                # 23 videos (no folder image)
+├── tag Latex/                  # 8 videos (no folder image)
+└── tag no tag/                 # 5 videos (no folder image)
 
 "By Models" Library:
-├── model Jane Doe/             # 12 videos
-├── model Sarah Smith/          # 7 videos
-└── model Alex Johnson/         # 9 videos
+├── model Jane Doe/             # 12 videos + folder.jpg (model photo)
+│   └── folder.jpg              # ← Automatically downloaded model image
+├── model Sarah Smith/          # 7 videos + folder.jpg (model photo)
+│   └── folder.jpg              # ← Automatically downloaded model image
+└── model Alex Johnson/         # 9 videos + folder.jpg (model photo)
+    └── folder.jpg              # ← Automatically downloaded model image
 
 "Source Videos" Library:
-├── sourcefolder/               # 50 videos (originals)
-├── sourcefolder2/              # 30 videos (originals)
+├── sourcefolder/               # 50 videos (originals) + NFO files
+│   ├── video1.mp4
+│   ├── video1.nfo              # ← Contains tags: BDSM, Latex, etc.
+│   ├── video2.mp4
+│   └── video2.nfo              # ← Contains tags: Bondage, etc.
+├── sourcefolder2/              # 30 videos (originals) + NFO files
 └── movies/                     # 10 videos (originals)
 ```
+
+**Enhanced Jellyfin Features:**
+- **Visual Model Browsing**: Model folders show preview images for easy identification
+- **Advanced Tag Filtering**: Use Jellyfin's tag filter to find videos with specific combinations
+- **Clean Tag Organization**: Tag folders focus on content without visual clutter
+- **Comprehensive Metadata**: Each video's NFO file contains all its tags for powerful searching
 
 All folders show the same videos, but organized differently for easy browsing!
 

@@ -6,16 +6,15 @@ and creates organized folders with symlinks to videos in a user-selected folder.
 """
 
 import os
-import sys
 import re
 import glob
 import time
+import requests
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
@@ -29,20 +28,17 @@ def select_video_folder():
     """Let user select the video folder to search for files"""
     print("Please select the video folder:")
     print("1. Current directory (./)")
-    print("2. videos subfolder (./videos/)")
-    print("3. Custom folder")
+    print("2. Custom folder")
     
     while True:
-        choice = input("Enter your choice (1-3): ").strip()
+        choice = input("Enter your choice (1-2): ").strip()
         
         if choice == "1":
             folder = "./"
         elif choice == "2":
-            folder = "./videos/"
-        elif choice == "3":
             folder = input("Enter the custom folder path: ").strip()
         else:
-            print("Invalid choice. Please enter 1, 2, or 3.")
+            print("Invalid choice. Please enter 1 or 2.")
             continue
         
         # Convert to absolute path
@@ -491,6 +487,168 @@ def extract_tag_name_from_url(url):
         log_with_timestamp(f"Error extracting tag name from {url}: {e}")
         return "Unknown"
 
+def download_model_image(url, folder_path):
+    """Download model preview image for model folders only"""
+    try:
+        # Only download images for model folders
+        if '/models/' not in url:
+            return False
+            
+        log_with_timestamp(f"   🖼️ Downloading model image from {url}")
+        
+        # Create a new webdriver instance for image downloading
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--window-size=1920,1080")
+        
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+        
+        try:
+            driver.get(url)
+            time.sleep(3)  # Wait for page to load
+            
+            # Look for model image using the provided HTML structure
+            img_selectors = [
+                '.modelPic img',  # From your example
+                '.modelBlock img',  # Alternative from your example
+                'img[alt*="model"]',  # Images with "model" in alt text
+                '.performer-image img',  # Common performer image class
+                '.model-photo img',  # Another common pattern
+                'img[src*="performer"]',  # Images with "performer" in src
+                'img[src*="model"]'  # Images with "model" in src
+            ]
+            
+            for selector in img_selectors:
+                try:
+                    img_element = driver.find_element(By.CSS_SELECTOR, selector)
+                    img_url = img_element.get_attribute('src')
+                    
+                    if img_url and img_url.startswith(('http', '//')):
+                        # Ensure full URL
+                        if img_url.startswith('//'):
+                            img_url = 'https:' + img_url
+                        elif img_url.startswith('/'):
+                            # Relative URL - build full URL
+                            base_url = url.split('/models/')[0] if '/models/' in url else url.rsplit('/', 1)[0]
+                            img_url = base_url + img_url
+                        
+                        # Download the image
+                        response = requests.get(img_url, timeout=10)
+                        if response.status_code == 200:
+                            img_path = os.path.join(folder_path, 'folder.jpg')
+                            with open(img_path, 'wb') as f:
+                                f.write(response.content)
+                            log_with_timestamp(f"   ✅ Model image saved: folder.jpg")
+                            return True
+                        
+                except Exception as selector_error:
+                    continue  # Try next selector
+            
+            log_with_timestamp(f"   ⚠️ No model image found with standard selectors")
+            return False
+            
+        finally:
+            driver.quit()
+            
+    except Exception as e:
+        log_with_timestamp(f"   ❌ Error downloading model image: {e}")
+        return False
+
+def create_video_nfo_with_tags(video_path, tags_list):
+    """Create NFO file for video with extracted tags"""
+    try:
+        if not tags_list:
+            return False
+            
+        video_dir = os.path.dirname(video_path)
+        video_name = os.path.splitext(os.path.basename(video_path))[0]
+        nfo_path = os.path.join(video_dir, f"{video_name}.nfo")
+        
+        # Create basic NFO content with tags
+        nfo_content = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<movie>
+    <title>{video_name}</title>
+    <plot>Video with tags: {', '.join(tags_list)}</plot>
+"""
+        
+        # Add each tag
+        for tag in tags_list:
+            nfo_content += f"    <tag>{tag}</tag>\n"
+            nfo_content += f"    <genre>{tag}</genre>\n"
+        
+        nfo_content += "</movie>"
+        
+        # Write NFO file
+        with open(nfo_path, 'w', encoding='utf-8') as f:
+            f.write(nfo_content)
+            
+        log_with_timestamp(f"   📝 Created NFO with {len(tags_list)} tags: {os.path.basename(nfo_path)}")
+        return True
+        
+    except Exception as e:
+        log_with_timestamp(f"   ❌ Error creating NFO file: {e}")
+        return False
+
+def create_video_nfo_files_with_tags(video_files, tags_folder):
+    """Create NFO files for videos based on which tag folders they appear in"""
+    try:
+        video_tags_map = {}  # Map video real path to list of tags
+        
+        # Walk through all tag folders to build video->tags mapping
+        for root, dirs, files in os.walk(tags_folder):
+            if root == tags_folder:  # Skip root tags folder
+                continue
+                
+            # Extract tag/model name from folder path
+            folder_name = os.path.basename(root)
+            
+            # Skip certain folders
+            if folder_name in ['No Tag', 'source']:
+                continue
+            
+            # Clean up folder name to get tag name
+            if folder_name.startswith('tag '):
+                tag_name = folder_name[4:]  # Remove 'tag ' prefix
+            elif folder_name.startswith('model '):
+                tag_name = folder_name[6:]  # Remove 'model ' prefix
+            else:
+                tag_name = folder_name
+            
+            # Find all video files in this tag folder
+            for file in files:
+                if file.endswith(('.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm', '.m4v')):
+                    file_path = os.path.join(root, file)
+                    
+                    # Get the real path (target of symlink)
+                    try:
+                        real_path = os.path.realpath(file_path)
+                        
+                        if real_path not in video_tags_map:
+                            video_tags_map[real_path] = []
+                        
+                        if tag_name not in video_tags_map[real_path]:
+                            video_tags_map[real_path].append(tag_name)
+                            
+                    except Exception as e:
+                        continue
+        
+        # Create NFO files for videos that have tags
+        nfo_count = 0
+        for real_path, tags_list in video_tags_map.items():
+            if len(tags_list) > 0:
+                if create_video_nfo_with_tags(real_path, tags_list):
+                    nfo_count += 1
+        
+        log_with_timestamp(f"   ✅ Created {nfo_count} NFO files with tag metadata")
+        return nfo_count
+        
+    except Exception as e:
+        log_with_timestamp(f"   ❌ Error creating video NFO files: {e}")
+        return 0
+
 def create_source_aware_symlink(target_path, tag_folder, video_files_dict):
     """Create symlink with source folder awareness to handle conflicts"""
     
@@ -637,6 +795,10 @@ def main():
             tag_folder = os.path.join(tags_folder, tag_name)
             os.makedirs(tag_folder, exist_ok=True)
             
+            # Download model image (only for model folders, not tag folders)
+            if '/models/' in url:
+                download_model_image(url, tag_folder)
+            
             # Match videos to files and create links
             matched_count = 0
             for video_title in video_titles:
@@ -685,6 +847,10 @@ def main():
                     no_tag_count += 1
         
         log_with_timestamp(f"   ✅ Added {no_tag_count} untagged videos to 'No Tag' folder")
+        
+        # Optional: Create NFO files with tags for videos (for Jellyfin filtering)
+        log_with_timestamp("🏷️ Creating NFO files with tags for Jellyfin filtering...")
+        create_video_nfo_files_with_tags(video_files, tags_folder)
         
         # Summary
         log_with_timestamp("📊 Summary:")
