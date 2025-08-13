@@ -141,7 +141,7 @@ If the above doesn't work, try installing specific compatible versions:
 pip uninstall selenium-wire blinker -y
 
 # Install compatible versions
-pip install "blinker==1.7.0" && pip install selenium-wire==5.1.0 && pip install webdriver-manager && pip install yt-dlp && pip install requests
+pip install "blinker==1.7.0" && pip install selenium-wire==5.1.0 && pip install webdriver-manager && pip install yt-dlp && pip install requests && pip install setuptools
 ```
 
 ## Step 7: Download the Scripts

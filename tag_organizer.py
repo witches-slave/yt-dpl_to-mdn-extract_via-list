@@ -16,6 +16,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
@@ -83,100 +84,329 @@ def crawl_tag_model_page(driver, url):
         driver.get(url)
         
         # Wait for page to load
-        time.sleep(2)
+        time.sleep(3)
         
-        video_titles = []
+        # Wait for dynamic content to load (in case videos are loaded via JavaScript)
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div.videoBlock"))
+            )
+            # Give it a bit more time for all videos to load
+            time.sleep(2)
+        except:
+            log_with_timestamp("   ⚠️ Timeout waiting for videoBlock elements, proceeding anyway")
         
-        # Try multiple selectors for video titles
-        title_selectors = [
-            "h3 a",
-            ".video-title a",
-            ".title a", 
-            "a[href*='/updates/']",
-            ".thumbnail a",
-            ".video-item a",
-            ".item-title a"
-        ]
+        all_video_titles = []
         
-        for selector in title_selectors:
+        # Extract videos from current page
+        def extract_videos_from_current_page():
+            video_titles = []
+            
+            # Use the most specific selector that works for this site
+            selector = "div.videoBlock h3 a"
+            
             try:
-                elements = driver.find_elements(By.CSS_SELECTOR, selector)
-                for element in elements:
-                    title = element.get_attribute("title") or element.text.strip()
-                    if title and len(title) > 3:  # Skip very short titles
-                        video_titles.append(title)
+                # First, let's see how many videoBlock divs exist total
+                all_video_blocks = driver.find_elements(By.CSS_SELECTOR, "div.videoBlock")
+                log_with_timestamp(f"   Found {len(all_video_blocks)} total videoBlock elements on page")
                 
-                if video_titles:
-                    break  # Found titles with this selector
-            except:
-                continue
+                # Now find the h3 a elements within those blocks
+                elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                log_with_timestamp(f"   Trying selector '{selector}': found {len(elements)} elements")
+                
+                if len(elements) != len(all_video_blocks):
+                    log_with_timestamp(f"   ⚠️ Mismatch: {len(all_video_blocks)} videoBlocks but only {len(elements)} h3 a elements")
+                
+                for i, element in enumerate(elements):
+                    log_with_timestamp(f"     Processing element {i+1}/{len(elements)}...")
+                    try:
+                        # Get all possible title sources for debugging
+                        text_content = element.text.strip() if element.text else ""
+                        title_attr = element.get_attribute("title") if element.get_attribute("title") else ""
+                        alt_attr = element.get_attribute("alt") if element.get_attribute("alt") else ""
+                        href_attr = element.get_attribute("href") if element.get_attribute("href") else ""
+                        
+                        log_with_timestamp(f"       text='{text_content}', title='{title_attr}', alt='{alt_attr}', href='{href_attr}'")
+                        
+                        # Get title from text content first (most reliable)
+                        title = text_content
+                        if not title:
+                            title = title_attr
+                        if not title:
+                            title = alt_attr
+                        
+                        # If still no title, try to extract from href as fallback
+                        if not title and href_attr:
+                            try:
+                                # Extract title from URL like "/updates/adara-jordin-living-doll-training"
+                                url_parts = href_attr.split('/')
+                                if len(url_parts) > 0:
+                                    url_title = url_parts[-1]  # Get the last part
+                                    # Convert URL slug to title
+                                    title = url_title.replace('-', ' ').replace('_', ' ').title()
+                                    log_with_timestamp(f"       Extracted title from URL: '{title}'")
+                            except:
+                                pass
+                        
+                        log_with_timestamp(f"       Final title selected: '{title}'")
+                        
+                        if title and len(title) > 3:  # Skip very short titles
+                            video_titles.append(title.strip())
+                            log_with_timestamp(f"     ✅ Video {len(video_titles)}: '{title.strip()}'")
+                        else:
+                            log_with_timestamp(f"     ❌ Element {i+1}: Title too short or empty: '{title}'")
+                            
+                    except Exception as e:
+                        log_with_timestamp(f"     ❌ Error processing element {i+1}: {e}")
+                        import traceback
+                        log_with_timestamp(f"     Full error: {traceback.format_exc()}")
+                        continue
+                
+                log_with_timestamp(f"   ✅ Successfully extracted {len(video_titles)} videos with selector: {selector}")
+                log_with_timestamp(f"   📋 Video titles: {video_titles}")
+                
+            except Exception as e:
+                log_with_timestamp(f"   ❌ Error with selector '{selector}': {e}")
+                import traceback
+                log_with_timestamp(f"   Full error: {traceback.format_exc()}")
+            
+            return video_titles
+        
+        # Extract videos from the first page
+        page_videos = extract_videos_from_current_page()
+        all_video_titles.extend(page_videos)
+        log_with_timestamp(f"   Page 1: Found {len(page_videos)} videos")
         
         # Check for pagination and crawl additional pages
         try:
-            # Find last page number for pagination
+            # Look for pagination in multiple ways
             pagination_selectors = [
                 "div.pagination a",
                 ".pagination a", 
                 "nav.pagination a",
-                ".page-numbers a"
+                ".page-numbers a",
+                ".paging a",
+                ".page-nav a",
+                "a[href*='page=']",
+                "a[href*='?page=']"
             ]
             
             last_page = 1
+            pagination_found = False
+            
+            # Try to find the highest page number from visible pagination
             for selector in pagination_selectors:
                 try:
                     page_links = driver.find_elements(By.CSS_SELECTOR, selector)
-                    for link in page_links:
-                        text = link.text.strip()
-                        if text.isdigit():
-                            last_page = max(last_page, int(text))
-                    if last_page > 1:
-                        break
-                except:
+                    if page_links:
+                        log_with_timestamp(f"   Checking pagination with selector: {selector}")
+                        for link in page_links:
+                            # Check link text for page numbers
+                            text = link.text.strip()
+                            if text.isdigit():
+                                last_page = max(last_page, int(text))
+                                pagination_found = True
+                            
+                            # Also check href for page numbers to find the real last page
+                            href = link.get_attribute("href") or ""
+                            if "page=" in href:
+                                try:
+                                    page_match = re.search(r'page=(\d+)', href)
+                                    if page_match:
+                                        page_num = int(page_match.group(1))
+                                        last_page = max(last_page, page_num)
+                                        pagination_found = True
+                                except:
+                                    pass
+                        
+                        if pagination_found:
+                            break
+                            
+                except Exception as e:
+                    log_with_timestamp(f"   ⚠️ Error checking pagination selector '{selector}': {e}")
                     continue
             
+            # Enhanced pagination detection - probe for actual last page
+            if pagination_found:
+                log_with_timestamp(f"   🔍 Found pagination, last visible page: {last_page}. Probing for actual last page...")
+                
+                # Probe beyond the visible last page to find the real last page
+                probe_page = last_page + 1
+                max_probe = last_page + 20  # Don't probe too far
+                actual_last_page = last_page
+                
+                while probe_page <= max_probe:
+                    probe_urls = [
+                        f"{url}?page={probe_page}",
+                        f"{url}/page/{probe_page}",
+                        f"{url}&page={probe_page}" if "?" in url else f"{url}?page={probe_page}"
+                    ]
+                    
+                    page_found = False
+                    for probe_url in probe_urls:
+                        try:
+                            log_with_timestamp(f"   🔍 Probing page {probe_page}: {probe_url}")
+                            driver.get(probe_url)
+                            time.sleep(1)
+                            
+                            # Check if this page has videos using the same logic as main extraction
+                            test_videos = []
+                            try:
+                                elements = driver.find_elements(By.CSS_SELECTOR, "div.videoBlock h3 a")
+                                test_videos = [elem.text.strip() for elem in elements if elem.text.strip() and len(elem.text.strip()) > 3]
+                            except:
+                                pass
+                            
+                            if test_videos:
+                                actual_last_page = probe_page
+                                page_found = True
+                                log_with_timestamp(f"   ✅ Page {probe_page} exists with {len(test_videos)} videos")
+                                break
+                            else:
+                                # Check if we get a 404 or empty page
+                                page_title = driver.title.lower()
+                                if "404" in page_title or "not found" in page_title or "error" in page_title:
+                                    log_with_timestamp(f"   ❌ Page {probe_page} returned 404/error")
+                                    break
+                                else:
+                                    log_with_timestamp(f"   ⚠️ Page {probe_page} exists but has no videos")
+                                    break
+                                
+                        except Exception as e:
+                            log_with_timestamp(f"   ⚠️ Error probing page {probe_page}: {e}")
+                            continue
+                    
+                    if not page_found:
+                        break
+                    
+                    probe_page += 1
+                
+                last_page = actual_last_page
+                log_with_timestamp(f"   📄 Actual last page determined: {last_page}")
+            
+            # Try alternative pagination detection if no standard pagination found
+            if not pagination_found:
+                try:
+                    # Check for next/more pages by looking for common pagination patterns
+                    next_selectors = ["a[href*='page=2']", "a[href*='?page=2']", ".next", ".more", "a[title*='Next']", "a[title*='next']"]
+                    for selector in next_selectors:
+                        elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                        if elements:
+                            pagination_found = True
+                            # Start with conservative estimate and probe for actual last page
+                            last_page = 2
+                            log_with_timestamp(f"   Found 'Next' pagination indicator with: {selector}")
+                            
+                            # Probe to find actual last page
+                            probe_page = 2
+                            max_probe = 50  # Higher limit when we don't know the range
+                            
+                            while probe_page <= max_probe:
+                                probe_urls = [
+                                    f"{url}?page={probe_page}",
+                                    f"{url}/page/{probe_page}",
+                                    f"{url}&page={probe_page}" if "?" in url else f"{url}?page={probe_page}"
+                                ]
+                                
+                                page_found = False
+                                for probe_url in probe_urls:
+                                    try:
+                                        driver.get(probe_url)
+                                        time.sleep(1)
+                                        
+                                        # Check if this page has videos using consistent logic
+                                        test_videos = []
+                                        try:
+                                            elements = driver.find_elements(By.CSS_SELECTOR, "div.videoBlock h3 a")
+                                            test_videos = [elem.text.strip() for elem in elements if elem.text.strip() and len(elem.text.strip()) > 3]
+                                        except:
+                                            pass
+                                        
+                                        if test_videos:
+                                            last_page = probe_page
+                                            page_found = True
+                                            break
+                                        else:
+                                            # No videos found, we've reached the end
+                                            break
+                                            
+                                    except Exception:
+                                        continue
+                                
+                                if not page_found:
+                                    break
+                                
+                                probe_page += 1
+                                
+                                # Safety check - if we're finding too many pages, something might be wrong
+                                if probe_page > 100:
+                                    log_with_timestamp(f"   ⚠️ Safety limit reached at page {probe_page}, stopping probe")
+                                    break
+                            
+                            log_with_timestamp(f"   📄 Probed pagination: found {last_page} total pages")
+                            break
+                except:
+                    pass
+            
             # Crawl additional pages if pagination exists
-            if last_page > 1:
-                log_with_timestamp(f"   Found pagination: {last_page} pages")
+            if pagination_found and last_page > 1:
+                log_with_timestamp(f"   📄 Found pagination: crawling pages 2 to {last_page}")
+                
+                # Go back to page 1 to start fresh
+                driver.get(url)
+                time.sleep(1)
                 
                 for page_num in range(2, last_page + 1):
-                    page_url = f"{url}?page={page_num}"
+                    # Try different URL formats for pagination
+                    page_urls = [
+                        f"{url}?page={page_num}",
+                        f"{url}/page/{page_num}",
+                        f"{url}&page={page_num}" if "?" in url else f"{url}?page={page_num}"
+                    ]
                     
-                    try:
-                        driver.get(page_url)
-                        time.sleep(1)
-                        
-                        for selector in title_selectors:
-                            try:
-                                elements = driver.find_elements(By.CSS_SELECTOR, selector)
-                                for element in elements:
-                                    title = element.get_attribute("title") or element.text.strip()
-                                    if title and len(title) > 3:
-                                        video_titles.append(title)
+                    page_success = False
+                    for page_url in page_urls:
+                        try:
+                            log_with_timestamp(f"   🔄 Crawling page {page_num}: {page_url}")
+                            driver.get(page_url)
+                            time.sleep(2)
+                            
+                            page_videos = extract_videos_from_current_page()
+                            if page_videos:
+                                all_video_titles.extend(page_videos)
+                                log_with_timestamp(f"   Page {page_num}: Found {len(page_videos)} videos")
+                                page_success = True
+                                break
+                            else:
+                                log_with_timestamp(f"   Page {page_num}: No videos found")
                                 
-                                if elements:
-                                    break
-                            except:
-                                continue
-                                
-                    except Exception as e:
-                        log_with_timestamp(f"   ⚠️ Error crawling page {page_num}: {e}")
+                        except Exception as e:
+                            log_with_timestamp(f"   ⚠️ Error crawling page {page_num} with URL {page_url}: {e}")
+                            continue
+                    
+                    # If this page failed, continue to next page (don't break the loop)
+                    if not page_success:
+                        log_with_timestamp(f"   ⚠️ Failed to load page {page_num}, continuing to next page")
+            else:
+                log_with_timestamp(f"   📄 No pagination detected - single page only")
         
         except Exception as e:
-            log_with_timestamp(f"   ⚠️ Error checking pagination: {e}")
+            log_with_timestamp(f"   ⚠️ Error during pagination handling: {e}")
         
         # Remove duplicates while preserving order
         unique_titles = []
         seen = set()
-        for title in video_titles:
+        for title in all_video_titles:
             if title not in seen:
                 unique_titles.append(title)
                 seen.add(title)
         
-        log_with_timestamp(f"   Found {len(unique_titles)} videos")
+        log_with_timestamp(f"   ✅ Total videos found across all pages: {len(unique_titles)}")
         return unique_titles
         
     except Exception as e:
         log_with_timestamp(f"   ❌ Error crawling {url}: {e}")
+        return []
 def normalize_title_for_matching(title):
     """Normalize title for better matching"""
     # Convert to lowercase
