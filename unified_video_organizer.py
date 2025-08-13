@@ -412,12 +412,15 @@ def extract_video_metadata(driver, video_url):
             WebDriverWait(driver, 3).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, '.models, .modelName'))
             )
+            # Fix selector for model - should look for modelName div with link
             model_links = driver.find_elements(By.CSS_SELECTOR, '.models a, .modelName a')
             if model_links:
                 metadata['model'] = model_links[0].text.strip()
                 log_with_timestamp(f"    ✅ Model: {metadata['model']}")
-        except:
-            log_with_timestamp(f"    ⚠️  No model found")
+            else:
+                log_with_timestamp(f"    ⚠️  No model links found")
+        except Exception as e:
+            log_with_timestamp(f"    ⚠️  No model found: {e}")
         
         # Extract tags with wait
         try:
@@ -425,14 +428,17 @@ def extract_video_metadata(driver, video_url):
             WebDriverWait(driver, 3).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, '.tags'))
             )
-            tag_links = driver.find_elements(By.CSS_SELECTOR, '.tags a')
+            # Fix selector for tags - should look inside the ul li structure
+            tag_links = driver.find_elements(By.CSS_SELECTOR, '.tags ul li a')
             for tag_link in tag_links:
                 tag_text = tag_link.text.strip()
                 if tag_text:
                     metadata['tags'].append(tag_text)
             log_with_timestamp(f"    ✅ Tags: {len(metadata['tags'])} found")
-        except:
-            log_with_timestamp(f"    ⚠️  No tags found")
+            if metadata['tags']:
+                log_with_timestamp(f"         Tags: {', '.join(metadata['tags'][:3])}{'...' if len(metadata['tags']) > 3 else ''}")
+        except Exception as e:
+            log_with_timestamp(f"    ⚠️  No tags found: {e}")
         
         # Extract video info (duration, photos, date)
         try:
