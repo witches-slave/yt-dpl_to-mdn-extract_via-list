@@ -335,8 +335,19 @@ def get_all_video_urls(domain):
 def extract_video_metadata(driver, video_url):
     """Extract comprehensive metadata from a video page"""
     try:
+        log_with_timestamp(f"  Loading video page: {video_url}")
         driver.get(video_url)
-        time.sleep(2)
+        
+        # Wait for page to fully load
+        try:
+            WebDriverWait(driver, 10).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+        except:
+            pass  # Continue even if timeout
+        
+        # Additional wait for content to render
+        time.sleep(3)
         
         metadata = {
             'url': video_url,
@@ -351,17 +362,25 @@ def extract_video_metadata(driver, video_url):
             'related_videos': []
         }
         
-        # Extract title
+        # Extract title with WebDriverWait
         try:
-            title_elem = driver.find_element(By.TAG_NAME, "h1")
-            metadata['title'] = title_elem.text.strip()
-        except:
-            pass
+            h1_element = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.TAG_NAME, "h1"))
+            )
+            metadata['title'] = h1_element.text.strip()
+            log_with_timestamp(f"    ✅ Title: {metadata['title']}")
+        except Exception as e:
+            log_with_timestamp(f"    ⚠️  Could not extract title: {e}")
         
         # Extract thumbnail from meta tag
         try:
+            # Wait for meta tags to be present
+            WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'meta[property="og:image"]'))
+            )
             thumbnail_elem = driver.find_element(By.CSS_SELECTOR, 'meta[property="og:image"]')
             metadata['thumbnail'] = thumbnail_elem.get_attribute("content")
+            log_with_timestamp(f"    ✅ Thumbnail found")
         except:
             # Fallback: try to find thumbnail in video preview section
             try:
@@ -369,41 +388,58 @@ def extract_video_metadata(driver, video_url):
                 poster = thumbnail_elem.get_attribute("poster")
                 if poster:
                     metadata['thumbnail'] = poster
+                    log_with_timestamp(f"    ✅ Thumbnail found (fallback)")
             except:
-                pass
+                log_with_timestamp(f"    ⚠️  No thumbnail found")
         
         # Extract description
         try:
             desc_elem = driver.find_element(By.CSS_SELECTOR, 'meta[property="og:description"]')
             metadata['description'] = desc_elem.get_attribute("content")
+            log_with_timestamp(f"    ✅ Description extracted ({len(metadata['description'])} chars)")
         except:
             # Fallback: look for description in content
             try:
                 desc_elem = driver.find_element(By.CSS_SELECTOR, '.videoDescription p')
                 metadata['description'] = desc_elem.text.strip()
+                log_with_timestamp(f"    ✅ Description extracted (fallback)")
             except:
-                pass
+                log_with_timestamp(f"    ⚠️  No description found")
         
-        # Extract model
+        # Extract model with wait
         try:
+            # Wait for models section to be present
+            WebDriverWait(driver, 3).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, '.models, .modelName'))
+            )
             model_links = driver.find_elements(By.CSS_SELECTOR, '.models a, .modelName a')
             if model_links:
                 metadata['model'] = model_links[0].text.strip()
+                log_with_timestamp(f"    ✅ Model: {metadata['model']}")
         except:
-            pass
+            log_with_timestamp(f"    ⚠️  No model found")
         
-        # Extract tags
+        # Extract tags with wait
         try:
+            # Wait for tags section to be present
+            WebDriverWait(driver, 3).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, '.tags'))
+            )
             tag_links = driver.find_elements(By.CSS_SELECTOR, '.tags a')
             for tag_link in tag_links:
                 tag_text = tag_link.text.strip()
                 if tag_text:
                     metadata['tags'].append(tag_text)
+            log_with_timestamp(f"    ✅ Tags: {len(metadata['tags'])} found")
         except:
-            pass
+            log_with_timestamp(f"    ⚠️  No tags found")
         
         # Extract video info (duration, photos, date)
         try:
+            # Wait for content info to be present
+            WebDriverWait(driver, 3).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, '.contentInfo'))
+            )
             info_items = driver.find_elements(By.CSS_SELECTOR, '.contentInfo li')
             for item in info_items:
                 text = item.text.strip()
@@ -415,8 +451,9 @@ def extract_video_metadata(driver, video_url):
                 elif any(month in text for month in ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
                                                     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']):
                     metadata['date'] = text
+            log_with_timestamp(f"    ✅ Video info extracted")
         except:
-            pass
+            log_with_timestamp(f"    ⚠️  No video info found")
         
         # Extract related videos
         try:
@@ -433,13 +470,14 @@ def extract_video_metadata(driver, video_url):
                         })
                 except:
                     continue
+            log_with_timestamp(f"    ✅ Related videos: {len(metadata['related_videos'])} found")
         except:
-            pass
+            log_with_timestamp(f"    ⚠️  No related videos found")
         
         return metadata
         
     except Exception as e:
-        log_with_timestamp(f"Error extracting metadata from {video_url}: {e}")
+        log_with_timestamp(f"    ❌ Error extracting metadata from {video_url}: {e}")
         return None
 
 # ===== FILE UTILITIES =====
@@ -508,7 +546,102 @@ def create_relative_symlink(target_path, link_path):
         log_with_timestamp(f"Error creating symlink {link_path} -> {target_path}: {e}")
         return False
 
-def create_nfo_file(video_path, metadata):
+def extract_model_image_url(driver, model_name, domain):
+    """Extract model image URL from model page"""
+    try:
+        # Clean model name for URL
+        clean_model = re.sub(r'[^\w\s-]', '', model_name).strip()
+        clean_model = re.sub(r'\s+', '-', clean_model).lower()
+        
+        model_url = f"{domain}/models/{clean_model}"
+        log_with_timestamp(f"  Fetching model image from: {model_url}")
+        
+        driver.get(model_url)
+        
+        # Wait for page to fully load
+        try:
+            WebDriverWait(driver, 10).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+        except:
+            pass  # Continue even if timeout
+        
+        # Additional wait for content to render
+        time.sleep(3)
+        
+        # Try to find model image with wait
+        image_selectors = [
+            'img.model-image',
+            '.model-photo img',
+            '.modelImage img',
+            '.profile-image img',
+            '.model-avatar img',
+            'img[alt*="' + model_name + '"]'
+        ]
+        
+        for selector in image_selectors:
+            try:
+                # Wait for image element to be present
+                WebDriverWait(driver, 3).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                )
+                img_elem = driver.find_element(By.CSS_SELECTOR, selector)
+                img_url = img_elem.get_attribute("src")
+                if img_url and "http" in img_url:
+                    log_with_timestamp(f"  ✅ Found model image: {img_url}")
+                    return img_url
+            except:
+                continue
+        
+        # Fallback: look for any large image that might be the model
+        try:
+            # Wait for any images to load
+            WebDriverWait(driver, 3).until(
+                EC.presence_of_element_located((By.TAG_NAME, "img"))
+            )
+            images = driver.find_elements(By.TAG_NAME, "img")
+            for img in images:
+                src = img.get_attribute("src")
+                alt = img.get_attribute("alt") or ""
+                if (src and "http" in src and 
+                    (model_name.lower() in alt.lower() or 
+                     "model" in src.lower() or 
+                     "profile" in src.lower())):
+                    log_with_timestamp(f"  ✅ Found model image (fallback): {src}")
+                    return src
+        except:
+            pass
+        
+        log_with_timestamp(f"  ⚠️  No model image found for {model_name}")
+        return None
+        
+    except Exception as e:
+        log_with_timestamp(f"  ❌ Error extracting model image: {e}")
+        return None
+
+def create_actress_nfo(model_dir, model_name, model_image_url):
+    """Create actress NFO file for model directory"""
+    try:
+        actress_nfo_path = os.path.join(model_dir, "actress.nfo")
+        
+        nfo_content = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<person>
+    <name>{model_name}</name>
+    <type>Actor</type>
+    <thumb>{model_image_url or ''}</thumb>
+</person>"""
+        
+        with open(actress_nfo_path, 'w', encoding='utf-8') as f:
+            f.write(nfo_content)
+        
+        log_with_timestamp(f"  ✅ Created actress.nfo for {model_name}")
+        return True
+        
+    except Exception as e:
+        log_with_timestamp(f"  ❌ Error creating actress NFO: {e}")
+        return False
+
+def create_nfo_file(video_path, metadata, model_image_url=None):
     """Create NFO file for video with extracted metadata"""
     try:
         nfo_path = os.path.splitext(video_path)[0] + '.nfo'
@@ -524,9 +657,16 @@ def create_nfo_file(video_path, metadata):
     <thumb>{metadata.get('thumbnail', '')}</thumb>
 """
         
-        # Add model as actor
+        # Add model as actor with image
         if metadata.get('model'):
-            nfo_content += f"    <actor>\n        <name>{metadata['model']}</name>\n    </actor>\n"
+            if model_image_url:
+                nfo_content += f"""    <actor>
+        <name>{metadata['model']}</name>
+        <thumb>{model_image_url}</thumb>
+    </actor>
+"""
+            else:
+                nfo_content += f"    <actor>\n        <name>{metadata['model']}</name>\n    </actor>\n"
         
         # Add tags as genres
         for tag in metadata.get('tags', []):
@@ -548,74 +688,102 @@ def create_nfo_file(video_path, metadata):
 
 # ===== MAIN ORGANIZATION LOGIC =====
 
-def organize_videos_by_metadata(video_folder, video_metadata_list):
+def organize_videos_by_metadata(video_folder, video_metadata_list, domain):
     """Organize videos by tags and models using extracted metadata"""
     log_with_timestamp("🗂️  Starting video organization...")
     
     organized_count = 0
     missing_videos = []
+    processed_models = {}  # Cache for model images to avoid re-downloading
     
-    for metadata in video_metadata_list:
-        video_title = metadata.get('title', '')
-        if not video_title:
-            continue
-        
-        # Find the actual video file
-        video_file = find_video_file(video_folder, video_title)
-        
-        if not video_file:
-            missing_videos.append({
-                'title': video_title,
-                'url': metadata.get('url', ''),
-                'model': metadata.get('model', ''),
-                'tags': metadata.get('tags', [])
-            })
-            continue
-        
-        log_with_timestamp(f"Organizing: {video_title}")
-        
-        # Create NFO file
-        create_nfo_file(video_file, metadata)
-        
-        # Download thumbnail if available
-        if metadata.get('thumbnail'):
-            thumbnail_path = os.path.splitext(video_file)[0] + '_thumb.jpg'
-            download_image(metadata['thumbnail'], thumbnail_path)
-        
-        # Create symlinks for model
-        model = metadata.get('model', '').strip()
-        if model:
-            clean_model = re.sub(r'[^\w\s-]', '', model).strip()
-            model_dir = os.path.join(video_folder, clean_model)
-            model_link = os.path.join(model_dir, os.path.basename(video_file))
+    # Setup browser for model image extraction
+    driver = setup_headless_browser()
+    if not driver:
+        log_with_timestamp("⚠️  Could not setup browser for model images, continuing without them")
+        driver = None
+    
+    try:
+        for metadata in video_metadata_list:
+            video_title = metadata.get('title', '')
+            if not video_title:
+                continue
             
-            if create_relative_symlink(video_file, model_link):
-                log_with_timestamp(f"  → Model symlink: {clean_model}")
+            # Find the actual video file
+            video_file = find_video_file(video_folder, video_title)
+            
+            if not video_file:
+                missing_videos.append({
+                    'title': video_title,
+                    'url': metadata.get('url', ''),
+                    'model': metadata.get('model', ''),
+                    'tags': metadata.get('tags', [])
+                })
+                continue
+            
+            log_with_timestamp(f"Organizing: {video_title}")
+            
+            # Handle model processing
+            model = metadata.get('model', '').strip()
+            model_image_url = None
+            
+            if model:
+                clean_model = re.sub(r'[^\w\s-]', '', model).strip()
+                model_dir = os.path.join(video_folder, clean_model)
                 
-                # Download model image as folder.jpg (we can extract this from the model page later if needed)
-                # For now, just use the video thumbnail
-                if metadata.get('thumbnail'):
-                    folder_jpg_path = os.path.join(model_dir, 'folder.jpg')
-                    if not os.path.exists(folder_jpg_path):
-                        download_image(metadata['thumbnail'], folder_jpg_path)
-        
-        # Create symlinks for tags
-        for tag in metadata.get('tags', []):
-            clean_tag = re.sub(r'[^\w\s-]', '', tag).strip()
-            if clean_tag:
-                tag_dir = os.path.join(video_folder, clean_tag)
-                tag_link = os.path.join(tag_dir, os.path.basename(video_file))
+                # Get or extract model image URL
+                if model in processed_models:
+                    model_image_url = processed_models[model]
+                elif driver:
+                    model_image_url = extract_model_image_url(driver, model, domain)
+                    processed_models[model] = model_image_url
+                    
+                    # Download model image as folder.jpg
+                    if model_image_url:
+                        folder_jpg_path = os.path.join(model_dir, 'folder.jpg')
+                        if not os.path.exists(folder_jpg_path):
+                            download_image(model_image_url, folder_jpg_path)
+                    
+                    # Create actress NFO file
+                    create_actress_nfo(model_dir, model, model_image_url)
+                    
+                    # Small delay to be respectful
+                    time.sleep(1)
                 
-                if create_relative_symlink(video_file, tag_link):
-                    log_with_timestamp(f"  → Tag symlink: {clean_tag}")
-        
-        organized_count += 1
+                # Create model symlink
+                model_link = os.path.join(model_dir, os.path.basename(video_file))
+                if create_relative_symlink(video_file, model_link):
+                    log_with_timestamp(f"  → Model symlink: {clean_model}")
+            
+            # Create NFO file with model image URL
+            create_nfo_file(video_file, metadata, model_image_url)
+            
+            # Download video thumbnail if available
+            if metadata.get('thumbnail'):
+                thumbnail_path = os.path.splitext(video_file)[0] + '_thumb.jpg'
+                download_image(metadata['thumbnail'], thumbnail_path)
+            
+            # Create symlinks for tags
+            for tag in metadata.get('tags', []):
+                clean_tag = re.sub(r'[^\w\s-]', '', tag).strip()
+                if clean_tag:
+                    tag_dir = os.path.join(video_folder, clean_tag)
+                    tag_link = os.path.join(tag_dir, os.path.basename(video_file))
+                    
+                    if create_relative_symlink(video_file, tag_link):
+                        log_with_timestamp(f"  → Tag symlink: {clean_tag}")
+            
+            organized_count += 1
+    
+    finally:
+        if driver:
+            driver.quit()
     
     # Print summary
     log_separator()
     log_with_timestamp("📊 ORGANIZATION SUMMARY")
     log_with_timestamp("=" * 40)
     log_with_timestamp(f"✅ Videos organized: {organized_count}")
+    log_with_timestamp(f"👤 Models processed: {len(processed_models)}")
     log_with_timestamp(f"❌ Missing videos: {len(missing_videos)}")
     
     if missing_videos:
@@ -671,7 +839,7 @@ def main():
             log_with_timestamp(f"✅ Extracted metadata from {len(video_metadata_list)} videos")
             
             # Organize videos based on extracted metadata
-            organize_videos_by_metadata(video_folder, video_metadata_list)
+            organize_videos_by_metadata(video_folder, video_metadata_list, domain)
             
             log_with_timestamp("🎉 Video organization completed successfully!")
             
