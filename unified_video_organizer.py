@@ -35,6 +35,55 @@ def log_separator():
     """Print a clean separator line without timestamp"""
     print()
 
+def debug_page_structure(driver, video_url):
+    """Debug function to print page structure for troubleshooting"""
+    try:
+        log_with_timestamp(f"🔍 DEBUG: Analyzing page structure for {video_url}")
+        
+        # Check for common class patterns
+        common_classes = ['tags', 'tag', 'model', 'modelName', 'performer', 'categories', 'genre']
+        for class_name in common_classes:
+            elements = driver.find_elements(By.CSS_SELECTOR, f'[class*="{class_name}"]')
+            if elements:
+                log_with_timestamp(f"    Found {len(elements)} elements with class containing '{class_name}'")
+                for elem in elements[:2]:  # Show first 2
+                    try:
+                        class_attr = elem.get_attribute("class")
+                        tag_name = elem.tag_name
+                        text = elem.text.strip()[:100]  # First 100 chars
+                        log_with_timestamp(f"      <{tag_name} class='{class_attr}'>{text}...")
+                    except:
+                        pass
+        
+        # Check for links that might be tags or models
+        links = driver.find_elements(By.TAG_NAME, "a")
+        tag_links = [link for link in links if "/tags/" in (link.get_attribute("href") or "")]  # Changed from /tag/ to /tags/
+        model_links = [link for link in links if "/model" in (link.get_attribute("href") or "")]
+        
+        log_with_timestamp(f"    Found {len(tag_links)} links containing '/tags/'")  # Updated message
+        log_with_timestamp(f"    Found {len(model_links)} links containing '/model'")
+        
+        # Show first few tag links
+        for link in tag_links[:3]:
+            try:
+                href = link.get_attribute("href")
+                text = link.text.strip()
+                log_with_timestamp(f"      Tag link: '{text}' -> {href}")
+            except:
+                pass
+                
+        # Show first few model links  
+        for link in model_links[:3]:
+            try:
+                href = link.get_attribute("href")
+                text = link.text.strip()
+                log_with_timestamp(f"      Model link: '{text}' -> {href}")
+            except:
+                pass
+                
+    except Exception as e:
+        log_with_timestamp(f"    DEBUG: Error analyzing page: {e}")
+
 def get_user_inputs():
     """Get domain and video folder from user"""
     print("=" * 60)
@@ -263,31 +312,32 @@ def extract_video_urls_from_page(driver, domain):
     unique_urls = list(set(video_urls))
     return unique_urls
 
-def crawl_updates_pages_manually(domain):
-    """Manually crawl /updates/ pages to find video URLs"""
-    log_with_timestamp("🕷️  Starting manual crawling of /updates/ pages")
+def process_videos_from_updates_pages(domain, video_folder):
+    """Process videos page by page from /updates/ pages"""
+    log_with_timestamp("🕷️  Starting page-by-page video processing from /updates/ pages")
     
     driver = setup_headless_browser()
     if not driver:
-        log_with_timestamp("Failed to setup browser for manual crawling")
-        return []
+        log_with_timestamp("Failed to setup browser for video processing")
+        return [], []
     
-    all_video_urls = []
+    processed_videos = []
+    missing_videos = []
     base_updates_url = f"{domain}/updates"
     
     try:
         # Start with the main updates page
-        log_with_timestamp(f"Crawling: {base_updates_url}")
+        log_with_timestamp(f"Loading updates page: {base_updates_url}")
         driver.get(base_updates_url)
         time.sleep(3)
         
         # Get pagination info
         pagination_urls = get_pagination_urls(driver, base_updates_url)
-        log_with_timestamp(f"Found {len(pagination_urls)} update pages to crawl")
+        log_with_timestamp(f"Found {len(pagination_urls)} update pages to process")
         
-        # Crawl each page
+        # Process each page immediately
         for i, page_url in enumerate(pagination_urls, 1):
-            log_with_timestamp(f"Crawling page {i}/{len(pagination_urls)}: {page_url}")
+            log_with_timestamp(f"\n📄 Processing page {i}/{len(pagination_urls)}: {page_url}")
             
             try:
                 driver.get(page_url)
@@ -295,40 +345,118 @@ def crawl_updates_pages_manually(domain):
                 
                 # Extract video URLs from this page
                 video_urls = extract_video_urls_from_page(driver, domain)
-                all_video_urls.extend(video_urls)
-                
                 log_with_timestamp(f"  Found {len(video_urls)} videos on this page")
                 
+                # Process each video immediately
+                for j, video_url in enumerate(video_urls, 1):
+                    log_with_timestamp(f"\n  🎬 Processing video {j}/{len(video_urls)} from page {i}")
+                    log_with_timestamp(f"     URL: {video_url}")
+                    
+                    # Extract metadata
+                    metadata = extract_video_metadata(driver, video_url)
+                    if metadata:
+                        video_title = metadata.get('title', 'Unknown')
+                        log_with_timestamp(f"     ✅ Title: {video_title}")
+                        log_with_timestamp(f"        Model: {metadata.get('model', 'Unknown')}")
+                        log_with_timestamp(f"        Tags: {len(metadata.get('tags', []))} tags")
+                        
+                        # Try to organize this video immediately
+                        video_file = find_video_file(video_folder, video_title)
+                        if video_file:
+                            log_with_timestamp(f"        ✅ Found local file: {os.path.basename(video_file)}")
+                            processed_videos.append(metadata)
+                            # Organize this video
+                            organize_single_video(video_file, metadata, domain, driver)
+                        else:
+                            log_with_timestamp(f"        ❌ Local file not found")
+                            missing_videos.append({
+                                'title': video_title,
+                                'url': metadata.get('url', ''),
+                                'model': metadata.get('model', ''),
+                                'tags': metadata.get('tags', [])
+                            })
+                    else:
+                        log_with_timestamp(f"     ❌ Failed to extract metadata")
+                    
+                    # Small delay between videos
+                    time.sleep(1)
+                
             except Exception as e:
-                log_with_timestamp(f"  Error crawling page: {e}")
+                log_with_timestamp(f"  ❌ Error processing page: {e}")
                 continue
         
-        # Remove duplicates while preserving order
-        unique_urls = []
-        seen = set()
-        for url in all_video_urls:
-            if url not in seen:
-                unique_urls.append(url)
-                seen.add(url)
+        log_with_timestamp(f"\n🎯 Page-by-page processing complete!")
+        log_with_timestamp(f"   Processed: {len(processed_videos)} videos")
+        log_with_timestamp(f"   Missing: {len(missing_videos)} videos")
         
-        log_with_timestamp(f"🎯 Manual crawling complete: found {len(unique_urls)} unique video URLs")
-        return unique_urls
+        return processed_videos, missing_videos
         
     finally:
         driver.quit()
 
-def get_all_video_urls(domain):
-    """Get all video URLs via manual crawling of /updates/ pages"""
-    log_with_timestamp("🔍 Starting video URL discovery via manual crawling...")
-    
-    video_urls = crawl_updates_pages_manually(domain)
-    
-    if not video_urls:
-        log_with_timestamp("❌ No video URLs found")
-        return []
-    
-    log_with_timestamp(f"✅ Found {len(video_urls)} video URLs")
-    return video_urls
+def organize_single_video(video_file, metadata, domain, driver=None):
+    """Organize a single video with its metadata"""
+    try:
+        video_title = metadata.get('title', '')
+        log_with_timestamp(f"  �️  Organizing: {video_title}")
+        
+        # Handle model processing
+        model = metadata.get('model', '').strip()
+        model_image_url = None
+        
+        # Get the video folder (parent directory of the video file)
+        video_folder = os.path.dirname(os.path.dirname(video_file))  # Go up one level from video file
+        
+        if model:
+            clean_model = re.sub(r'[^\w\s-]', '', model).strip()
+            model_dir = os.path.join(video_folder, clean_model)
+            
+            # Extract model image URL if driver is available
+            if driver:
+                model_image_url = extract_model_image_url(driver, model, domain)
+                
+                # Download model image as folder.jpg
+                if model_image_url:
+                    folder_jpg_path = os.path.join(model_dir, 'folder.jpg')
+                    if not os.path.exists(folder_jpg_path):
+                        if download_image(model_image_url, folder_jpg_path):
+                            log_with_timestamp(f"    ✅ Downloaded model image")
+                
+                # Create actress NFO file
+                create_actress_nfo(model_dir, model, model_image_url)
+                
+                # Small delay to be respectful
+                time.sleep(1)
+            
+            # Create model symlink
+            model_link = os.path.join(model_dir, os.path.basename(video_file))
+            if create_relative_symlink(video_file, model_link):
+                log_with_timestamp(f"    → Model symlink: {clean_model}")
+        
+        # Create NFO file with model image URL
+        create_nfo_file(video_file, metadata, model_image_url)
+        
+        # Download video thumbnail if available
+        if metadata.get('thumbnail'):
+            thumbnail_path = os.path.splitext(video_file)[0] + '_thumb.jpg'
+            if download_image(metadata['thumbnail'], thumbnail_path):
+                log_with_timestamp(f"    ✅ Downloaded thumbnail")
+        
+        # Create symlinks for tags
+        for tag in metadata.get('tags', []):
+            clean_tag = re.sub(r'[^\w\s-]', '', tag).strip()
+            if clean_tag:
+                tag_dir = os.path.join(video_folder, clean_tag)
+                tag_link = os.path.join(tag_dir, os.path.basename(video_file))
+                
+                if create_relative_symlink(video_file, tag_link):
+                    log_with_timestamp(f"    → Tag symlink: {clean_tag}")
+        
+        return True
+        
+    except Exception as e:
+        log_with_timestamp(f"    ❌ Error organizing video: {e}")
+        return False
 
 # ===== VIDEO METADATA EXTRACTION =====
 
@@ -349,6 +477,14 @@ def extract_video_metadata(driver, video_url):
         # Additional wait for content to render
         time.sleep(3)
         
+        # Wait specifically for tags and models sections to load
+        try:
+            WebDriverWait(driver, 10).until(
+                lambda d: d.find_elements(By.CSS_SELECTOR, '.tags, .models')
+            )
+        except:
+            log_with_timestamp(f"    ⚠️  Timeout waiting for tags/models sections to load")
+        
         metadata = {
             'url': video_url,
             'title': '',
@@ -367,7 +503,7 @@ def extract_video_metadata(driver, video_url):
             h1_element = WebDriverWait(driver, 5).until(
                 EC.presence_of_element_located((By.TAG_NAME, "h1"))
             )
-            metadata['title'] = h1_element.text.strip()
+            metadata['title'] = h1_element.text.strip().upper()
             log_with_timestamp(f"    ✅ Title: {metadata['title']}")
         except Exception as e:
             log_with_timestamp(f"    ⚠️  Could not extract title: {e}")
@@ -406,39 +542,184 @@ def extract_video_metadata(driver, video_url):
             except:
                 log_with_timestamp(f"    ⚠️  No description found")
         
-        # Extract model with wait
+        # Extract model with enhanced debugging
         try:
-            # Wait for models section to be present
-            WebDriverWait(driver, 3).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, '.models, .modelName'))
-            )
-            # Fix selector for model - should look for modelName div with link
-            model_links = driver.find_elements(By.CSS_SELECTOR, '.models a, .modelName a')
-            if model_links:
-                metadata['model'] = model_links[0].text.strip()
-                log_with_timestamp(f"    ✅ Model: {metadata['model']}")
-            else:
-                log_with_timestamp(f"    ⚠️  No model links found")
+            # Multiple selectors to try for model based on actual HTML structure
+            model_selectors = [
+                '.models ul li a',  # The actual structure: div.models > ul > li > a
+                '.models a', 
+                'div.models ul li a',
+                '.modelName a',
+                '.model-name a',
+                '.performer a',
+                'a[href*="/models/"]'
+            ]
+            
+            model_found = False
+            log_with_timestamp(f"    🔍 Searching for model...")
+            
+            for selector in model_selectors:
+                try:
+                    model_links = driver.find_elements(By.CSS_SELECTOR, selector)
+                    if model_links:
+                        # Extract text, removing any icon text - try multiple methods
+                        model_text = model_links[0].text.strip()
+                        
+                        # If text is empty, try getting textContent via JavaScript
+                        if not model_text:
+                            try:
+                                model_text = driver.execute_script(
+                                    "return arguments[0].textContent || arguments[0].innerText;", 
+                                    model_links[0]
+                                ).strip()
+                            except:
+                                pass
+                        
+                        # If still empty, try getting text from children excluding icons
+                        if not model_text:
+                            try:
+                                # Get all text nodes, excluding icon elements
+                                model_text = driver.execute_script("""
+                                    var elem = arguments[0];
+                                    var text = '';
+                                    for (var i = 0; i < elem.childNodes.length; i++) {
+                                        var node = elem.childNodes[i];
+                                        if (node.nodeType === 3) { // Text node
+                                            text += node.textContent;
+                                        } else if (node.nodeType === 1 && !node.classList.contains('fa-solid')) { // Element node, not icon
+                                            text += node.textContent;
+                                        }
+                                    }
+                                    return text.trim();
+                                """, model_links[0])
+                            except:
+                                pass
+                        
+                        if model_text:
+                            metadata['model'] = model_text
+                            log_with_timestamp(f"    ✅ Model found with selector '{selector}': {metadata['model']}")
+                            model_found = True
+                            break
+                        else:
+                            log_with_timestamp(f"    🔍 Selector '{selector}' found element but no text")
+                except Exception as e:
+                    log_with_timestamp(f"    🔍 Selector '{selector}' failed: {e}")
+                    continue
+            
+            if not model_found:
+                # Debug: Print page structure around models with more detail
+                try:
+                    possible_model_divs = driver.find_elements(By.CSS_SELECTOR, 'div[class*="model"], div[class*="performer"]')
+                    if possible_model_divs:
+                        log_with_timestamp(f"    🔍 Found {len(possible_model_divs)} potential model containers")
+                        for div in possible_model_divs[:3]:  # Check first 3
+                            class_name = div.get_attribute("class")
+                            text_content = div.text.strip()
+                            inner_html = div.get_attribute("innerHTML")[:200]  # First 200 chars of HTML
+                            log_with_timestamp(f"         Class: '{class_name}', Text: '{text_content}'")
+                            log_with_timestamp(f"         HTML: {inner_html}...")
+                            
+                            # Try to find links within this div
+                            links_in_div = div.find_elements(By.TAG_NAME, "a")
+                            log_with_timestamp(f"         Links in div: {len(links_in_div)}")
+                            for link in links_in_div:
+                                link_text = link.text.strip()
+                                link_href = link.get_attribute("href")
+                                log_with_timestamp(f"           Link: '{link_text}' -> {link_href}")
+                    else:
+                        log_with_timestamp(f"    ⚠️  No model containers found in page")
+                except Exception as e:
+                    log_with_timestamp(f"    ❌ Error in model debug: {e}")
+                log_with_timestamp(f"    ⚠️  No model found with any selector")
+                
         except Exception as e:
-            log_with_timestamp(f"    ⚠️  No model found: {e}")
+            log_with_timestamp(f"    ❌ Error extracting model: {e}")
         
-        # Extract tags with wait
+        # Extract tags with enhanced debugging
         try:
-            # Wait for tags section to be present
-            WebDriverWait(driver, 3).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, '.tags'))
-            )
-            # Fix selector for tags - should look inside the ul li structure
-            tag_links = driver.find_elements(By.CSS_SELECTOR, '.tags ul li a')
-            for tag_link in tag_links:
-                tag_text = tag_link.text.strip()
-                if tag_text:
-                    metadata['tags'].append(tag_text)
-            log_with_timestamp(f"    ✅ Tags: {len(metadata['tags'])} found")
-            if metadata['tags']:
-                log_with_timestamp(f"         Tags: {', '.join(metadata['tags'][:3])}{'...' if len(metadata['tags']) > 3 else ''}")
+            # Multiple selectors to try for tags based on actual HTML structure
+            tag_selectors = [
+                '.tags ul li a',  # The actual structure: div.tags > ul > li > a
+                '.tags li a',
+                '.tags a',
+                'div.tags ul li a',
+                '.tag-list a',
+                'a[href*="/tags/"]'  # Changed from /tag/ to /tags/
+            ]
+            
+            tags_found = False
+            log_with_timestamp(f"    🔍 Searching for tags...")
+            
+            for selector in tag_selectors:
+                try:
+                    tag_links = driver.find_elements(By.CSS_SELECTOR, selector)
+                    if tag_links:
+                        for tag_link in tag_links:
+                            # Extract text, removing any icon text - try multiple methods
+                            tag_text = tag_link.text.strip()
+                            
+                            # If text is empty, try getting textContent via JavaScript
+                            if not tag_text:
+                                try:
+                                    tag_text = driver.execute_script(
+                                        "return arguments[0].textContent || arguments[0].innerText;", 
+                                        tag_link
+                                    ).strip()
+                                except:
+                                    pass
+                            
+                            # If still empty, try getting text from children excluding icons
+                            if not tag_text:
+                                try:
+                                    # Get all text nodes, excluding icon elements
+                                    tag_text = driver.execute_script("""
+                                        var elem = arguments[0];
+                                        var text = '';
+                                        for (var i = 0; i < elem.childNodes.length; i++) {
+                                            var node = elem.childNodes[i];
+                                            if (node.nodeType === 3) { // Text node
+                                                text += node.textContent;
+                                            } else if (node.nodeType === 1 && !node.classList.contains('fa-solid')) { // Element node, not icon
+                                                text += node.textContent;
+                                            }
+                                        }
+                                        return text.trim();
+                                    """, tag_link)
+                                except:
+                                    pass
+                            
+                            if tag_text:
+                                metadata['tags'].append(tag_text)
+                        
+                        if metadata['tags']:
+                            log_with_timestamp(f"    ✅ Tags found with selector '{selector}': {len(metadata['tags'])} tags")
+                            log_with_timestamp(f"         Tags: {', '.join(metadata['tags'][:3])}{'...' if len(metadata['tags']) > 3 else ''}")
+                            tags_found = True
+                            break
+                        else:
+                            log_with_timestamp(f"    🔍 Selector '{selector}' found elements but no text")
+                except Exception as e:
+                    log_with_timestamp(f"    🔍 Selector '{selector}' failed: {e}")
+                    continue
+            
+            if not tags_found:
+                # Debug: Print page structure around tags
+                try:
+                    possible_tag_divs = driver.find_elements(By.CSS_SELECTOR, 'div[class*="tag"], div[class*="category"]')
+                    if possible_tag_divs:
+                        log_with_timestamp(f"    🔍 Found {len(possible_tag_divs)} potential tag containers")
+                        for div in possible_tag_divs[:3]:  # Check first 3
+                            class_name = div.get_attribute("class")
+                            text_content = div.text.strip()[:50]  # First 50 chars
+                            log_with_timestamp(f"         Class: '{class_name}', Text: '{text_content}'")
+                    else:
+                        log_with_timestamp(f"    ⚠️  No tag containers found in page")
+                except:
+                    pass
+                log_with_timestamp(f"    ⚠️  No tags found with any selector")
+                
         except Exception as e:
-            log_with_timestamp(f"    ⚠️  No tags found: {e}")
+            log_with_timestamp(f"    ❌ Error extracting tags: {e}")
         
         # Extract video info (duration, photos, date)
         try:
@@ -463,22 +744,68 @@ def extract_video_metadata(driver, video_url):
         
         # Extract related videos
         try:
-            related_blocks = driver.find_elements(By.CSS_SELECTOR, '.relatedVideos .videoBlock')
-            for block in related_blocks[:5]:  # Limit to first 5 related videos
+            # Multiple selectors to try for related videos based on actual HTML structure
+            related_selectors = [
+                '.relatedVideos .videoBlock',  # The actual structure
+                '.related-videos .videoBlock',
+                '.videoBlock',
+                '.related .video-item'
+            ]
+            
+            related_found = False
+            log_with_timestamp(f"    🔍 Searching for related videos...")
+            
+            for selector in related_selectors:
                 try:
-                    title_elem = block.find_element(By.CSS_SELECTOR, 'h3 a')
-                    related_title = title_elem.text.strip()
-                    related_url = title_elem.get_attribute("href")
-                    if related_title and related_url:
-                        metadata['related_videos'].append({
-                            'title': related_title,
-                            'url': related_url
-                        })
-                except:
+                    related_blocks = driver.find_elements(By.CSS_SELECTOR, selector)
+                    if related_blocks:
+                        log_with_timestamp(f"    ✅ Found {len(related_blocks)} related videos with selector '{selector}'")
+                        
+                        for block in related_blocks[:5]:  # Limit to first 5 related videos
+                            try:
+                                # Try multiple selectors for title within each block
+                                title_selectors = ['h3 a', 'h2 a', '.title a', 'a[href*="/updates/"]']
+                                for title_sel in title_selectors:
+                                    try:
+                                        title_elem = block.find_element(By.CSS_SELECTOR, title_sel)
+                                        related_title = title_elem.text.strip()
+                                        
+                                        # If text is empty, try getting textContent via JavaScript
+                                        if not related_title:
+                                            try:
+                                                related_title = driver.execute_script(
+                                                    "return arguments[0].textContent || arguments[0].innerText;", 
+                                                    title_elem
+                                                ).strip()
+                                            except:
+                                                pass
+                                        
+                                        related_url = title_elem.get_attribute("href")
+                                        if related_title and related_url and "/updates/" in related_url:
+                                            metadata['related_videos'].append({
+                                                'title': related_title.upper(),  # Convert to uppercase for consistency
+                                                'url': related_url
+                                            })
+                                            break
+                                    except:
+                                        continue
+                            except:
+                                continue
+                        
+                        if metadata['related_videos']:
+                            log_with_timestamp(f"    ✅ Related videos: {len(metadata['related_videos'])} found")
+                            related_found = True
+                            break
+                        
+                except Exception as e:
+                    log_with_timestamp(f"    🔍 Selector '{selector}' failed: {e}")
                     continue
-            log_with_timestamp(f"    ✅ Related videos: {len(metadata['related_videos'])} found")
-        except:
-            log_with_timestamp(f"    ⚠️  No related videos found")
+                    
+            if not related_found:
+                log_with_timestamp(f"    ⚠️  No related videos found")
+                
+        except Exception as e:
+            log_with_timestamp(f"    ❌ Error extracting related videos: {e}")
         
         return metadata
         
@@ -692,114 +1019,7 @@ def create_nfo_file(video_path, metadata, model_image_url=None):
         log_with_timestamp(f"Error creating NFO file for {video_path}: {e}")
         return False
 
-# ===== MAIN ORGANIZATION LOGIC =====
-
-def organize_videos_by_metadata(video_folder, video_metadata_list, domain):
-    """Organize videos by tags and models using extracted metadata"""
-    log_with_timestamp("🗂️  Starting video organization...")
-    
-    organized_count = 0
-    missing_videos = []
-    processed_models = {}  # Cache for model images to avoid re-downloading
-    
-    # Setup browser for model image extraction
-    driver = setup_headless_browser()
-    if not driver:
-        log_with_timestamp("⚠️  Could not setup browser for model images, continuing without them")
-        driver = None
-    
-    try:
-        for metadata in video_metadata_list:
-            video_title = metadata.get('title', '')
-            if not video_title:
-                continue
-            
-            # Find the actual video file
-            video_file = find_video_file(video_folder, video_title)
-            
-            if not video_file:
-                missing_videos.append({
-                    'title': video_title,
-                    'url': metadata.get('url', ''),
-                    'model': metadata.get('model', ''),
-                    'tags': metadata.get('tags', [])
-                })
-                continue
-            
-            log_with_timestamp(f"Organizing: {video_title}")
-            
-            # Handle model processing
-            model = metadata.get('model', '').strip()
-            model_image_url = None
-            
-            if model:
-                clean_model = re.sub(r'[^\w\s-]', '', model).strip()
-                model_dir = os.path.join(video_folder, clean_model)
-                
-                # Get or extract model image URL
-                if model in processed_models:
-                    model_image_url = processed_models[model]
-                elif driver:
-                    model_image_url = extract_model_image_url(driver, model, domain)
-                    processed_models[model] = model_image_url
-                    
-                    # Download model image as folder.jpg
-                    if model_image_url:
-                        folder_jpg_path = os.path.join(model_dir, 'folder.jpg')
-                        if not os.path.exists(folder_jpg_path):
-                            download_image(model_image_url, folder_jpg_path)
-                    
-                    # Create actress NFO file
-                    create_actress_nfo(model_dir, model, model_image_url)
-                    
-                    # Small delay to be respectful
-                    time.sleep(1)
-                
-                # Create model symlink
-                model_link = os.path.join(model_dir, os.path.basename(video_file))
-                if create_relative_symlink(video_file, model_link):
-                    log_with_timestamp(f"  → Model symlink: {clean_model}")
-            
-            # Create NFO file with model image URL
-            create_nfo_file(video_file, metadata, model_image_url)
-            
-            # Download video thumbnail if available
-            if metadata.get('thumbnail'):
-                thumbnail_path = os.path.splitext(video_file)[0] + '_thumb.jpg'
-                download_image(metadata['thumbnail'], thumbnail_path)
-            
-            # Create symlinks for tags
-            for tag in metadata.get('tags', []):
-                clean_tag = re.sub(r'[^\w\s-]', '', tag).strip()
-                if clean_tag:
-                    tag_dir = os.path.join(video_folder, clean_tag)
-                    tag_link = os.path.join(tag_dir, os.path.basename(video_file))
-                    
-                    if create_relative_symlink(video_file, tag_link):
-                        log_with_timestamp(f"  → Tag symlink: {clean_tag}")
-            
-            organized_count += 1
-    
-    finally:
-        if driver:
-            driver.quit()
-    
-    # Print summary
-    log_separator()
-    log_with_timestamp("📊 ORGANIZATION SUMMARY")
-    log_with_timestamp("=" * 40)
-    log_with_timestamp(f"✅ Videos organized: {organized_count}")
-    log_with_timestamp(f"👤 Models processed: {len(processed_models)}")
-    log_with_timestamp(f"❌ Missing videos: {len(missing_videos)}")
-    
-    if missing_videos:
-        log_with_timestamp("\n📋 Missing Videos (found online but not in folder):")
-        for missing in missing_videos:
-            log_with_timestamp(f"  • {missing['title']}")
-            log_with_timestamp(f"    Model: {missing['model']}")
-            log_with_timestamp(f"    Tags: {', '.join(missing['tags'])}")
-            log_with_timestamp(f"    URL: {missing['url']}")
-            log_with_timestamp("")
+# ===== MAIN LOGIC =====
 
 def main():
     """Main function"""
@@ -807,50 +1027,27 @@ def main():
         # Get user inputs
         domain, video_folder = get_user_inputs()
         
-        # Get all video URLs
-        video_urls = get_all_video_urls(domain)
+        # Process videos page by page
+        log_with_timestamp("🚀 Starting page-by-page video processing...")
+        processed_videos, missing_videos = process_videos_from_updates_pages(domain, video_folder)
         
-        if not video_urls:
-            log_with_timestamp("❌ No video URLs found. Exiting.")
-            sys.exit(1)
+        # Print final summary
+        log_separator()
+        log_with_timestamp("📊 FINAL PROCESSING SUMMARY")
+        log_with_timestamp("=" * 40)
+        log_with_timestamp(f"✅ Videos processed: {len(processed_videos)}")
+        log_with_timestamp(f"❌ Missing videos: {len(missing_videos)}")
         
-        log_with_timestamp(f"🎬 Found {len(video_urls)} videos to process")
+        if missing_videos:
+            log_with_timestamp("\n📋 Missing Videos (found online but not in folder):")
+            for missing in missing_videos:
+                log_with_timestamp(f"  • {missing['title']}")
+                log_with_timestamp(f"    Model: {missing['model']}")
+                log_with_timestamp(f"    Tags: {', '.join(missing['tags'])}")
+                log_with_timestamp(f"    URL: {missing['url']}")
+                log_with_timestamp("")
         
-        # Setup browser for metadata extraction
-        driver = setup_headless_browser()
-        if not driver:
-            log_with_timestamp("❌ Failed to setup browser. Exiting.")
-            sys.exit(1)
-        
-        try:
-            # Extract metadata from all videos
-            log_with_timestamp("🔍 Extracting metadata from video pages...")
-            video_metadata_list = []
-            
-            for i, video_url in enumerate(video_urls, 1):
-                log_with_timestamp(f"Processing {i}/{len(video_urls)}: {video_url}")
-                
-                metadata = extract_video_metadata(driver, video_url)
-                if metadata:
-                    video_metadata_list.append(metadata)
-                    log_with_timestamp(f"  ✅ Title: {metadata.get('title', 'Unknown')}")
-                    log_with_timestamp(f"     Model: {metadata.get('model', 'Unknown')}")
-                    log_with_timestamp(f"     Tags: {len(metadata.get('tags', []))} tags")
-                else:
-                    log_with_timestamp(f"  ❌ Failed to extract metadata")
-                
-                # Small delay to be respectful
-                time.sleep(1)
-            
-            log_with_timestamp(f"✅ Extracted metadata from {len(video_metadata_list)} videos")
-            
-            # Organize videos based on extracted metadata
-            organize_videos_by_metadata(video_folder, video_metadata_list, domain)
-            
-            log_with_timestamp("🎉 Video organization completed successfully!")
-            
-        finally:
-            driver.quit()
+        log_with_timestamp("🎉 Page-by-page video processing completed successfully!")
             
     except KeyboardInterrupt:
         log_with_timestamp("❌ Process interrupted by user")
