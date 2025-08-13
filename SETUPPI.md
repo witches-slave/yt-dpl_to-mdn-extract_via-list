@@ -554,12 +554,13 @@ External NTFS Drive (large storage):
 
 **Understanding the Unified Video Organization System:**
 
-The `unified_video_organizer.py` script creates a sophisticated folder structure using symlinks to organize your videos without duplicating files. Here's how it works:
+The system uses a three-step workflow to organize your videos:
 
-1. **Source videos** remain in their original download folders (e.g., `sourcefolder/`, `sourcefolder2/`)
-2. **Automatic page crawling** - script discovers all videos by crawling /updates/ pages automatically
-3. **Symlinks** are created in the `tags/` folder pointing to the original files
-4. **Organization structure** created by unified_video_organizer.py:
+1. **URL extraction** - `sitemap_video_parser.py` crawls /updates/ pages to get current video URLs
+2. **Source videos** remain in their original download folders (e.g., `sourcefolder/`, `sourcefolder2/`)
+3. **Video list processing** - scripts read from shared `list_video.txt` for consistency
+4. **Symlinks** are created in the `tags/` folder pointing to the original files
+5. **Organization structure** created by unified_video_organizer.py:
 
 ```
 /media/jellyfin/
@@ -605,12 +606,16 @@ The `unified_video_organizer.py` script creates a sophisticated folder structure
 
 **How the Unified Video Organization Works:**
 
-1. **Download Phase** (done on development machine):
+1. **URL Extraction Phase** (done on development machine):
+   - `sitemap_video_parser.py` crawls /updates/ pages to get current video URLs
+   - Creates `list_video.txt` with all available videos (avoids dead links from sitemaps)
+
+2. **Download Phase** (done on development machine):
    - Videos are downloaded to source folders like `sourcefolder/`, `sourcefolder2/`
    - Each video keeps its original filename and location
 
-2. **Organization Phase** (done on development machine):
-   - `unified_video_organizer.py` automatically crawls all /updates/ pages
+3. **Organization Phase** (done on development machine):
+   - `unified_video_organizer.py` reads from `list_video.txt`
    - Script extracts metadata from each video page (tags, models, related videos)
    - Creates **relative symlinks** in `tags/` folder pointing to original videos
    - **Downloads model preview images** automatically (for model folders)
@@ -681,10 +686,13 @@ All folders show the same videos, but organized differently for easy browsing!
    cd /path/to/yt-dpl_to-mdn-extract_via-list
    source venv/bin/activate
    
-   # Download videos to NTFS drive
+   # Extract current video URLs from /updates/ pages
+   python3 sitemap_video_parser.py
+   
+   # Download videos to NTFS drive (uses list_video.txt)
    python3 download.py
    
-   # Organize with relative symlinks (portable across machines)
+   # Organize with relative symlinks (uses list_video.txt)
    python3 unified_video_organizer.py
    # When prompted, specify:
    # - Domain (e.g., https://shinybound.com)
@@ -949,9 +957,10 @@ cd /media/jellyfin/scripts
 
 **Development Machine** (where all the work happens):
 1. ✅ **Setup scripts** following the main `README.md` instructions
-2. ✅ **Download videos** using your configured download scripts  
-3. ✅ **Organize with relative symlinks** using `unified_video_organizer.py` (auto-crawls /updates/ pages)
-4. ✅ **Content ready** - Tags folder contains organized media with portable symlinks
+2. ✅ **Extract video URLs** using `sitemap_video_parser.py` (crawls /updates/ pages)
+3. ✅ **Download videos** using your configured download scripts  
+4. ✅ **Organize with relative symlinks** using `unified_video_organizer.py` (reads list_video.txt)
+5. ✅ **Content ready** - Tags folder contains organized media with portable symlinks
 
 **Raspberry Pi** (clean media server):
 1. ✅ **Connect NTFS drive** → Content immediately available

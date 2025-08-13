@@ -4,13 +4,14 @@ This comprehensive guide will help you set up an automated video download and or
 
 ## Overview
 
-This system consists of 2 main scripts that work together:
-1. **download.py** - Downloads videos from URL lists → saves to specified folder
-2. **unified_video_organizer.py** - Unified script that crawls /updates/ pages, extracts metadata, creates organized folder structure with symlinks, downloads model images, and generates NFO files for Jellyfin
+This system consists of 3 main scripts that work together:
+1. **sitemap_video_parser.py** - Crawls /updates/ pages to extract all current video URLs → creates list_video.txt
+2. **download.py** - Downloads videos from list_video.txt → saves to specified folder
+3. **unified_video_organizer.py** - Reads list_video.txt, extracts metadata, creates organized folder structure with symlinks, downloads model images, and generates NFO files for Jellyfin
 
 ### Key Features:
-- **🎯 Unified Workflow**: Single script handles page crawling, organization, metadata extraction, and NFO generation
-- **📄 Automatic Pagination**: Discovers and processes all pages in /updates/ automatically
+- **🎯 Reliable URL Extraction**: Crawls live /updates/ pages to get current video URLs (avoids dead links from sitemaps)
+- **📄 Shared Video List**: All scripts use the same list_video.txt for consistency
 - **📊 Rich Metadata**: Extracts tags, models, related videos, and downloads model images
 - **🔗 Smart Symlinks**: Creates organized folder structure with relative symlinks for cross-platform compatibility
 - **📁 Jellyfin Integration**: Generates NFO files and folder.jpg images for perfect Jellyfin integration
@@ -156,24 +157,25 @@ sudo systemctl status jellyfin
 
 ## Step 3: Download and Organization Workflow
 
-### Prepare Video Lists
+### Extract Video URLs
 
-Create your video URL lists manually or use existing parsers:
-
-```bash
-# Create list_video.txt with video URLs (one per line)
-# Format: https://domain.com/updates/video-title/
-echo "https://example.com/updates/video1/" > list_video.txt
-echo "https://example.com/updates/video2/" >> list_video.txt
-```
-
-### Download Videos
+First, extract all current video URLs from the site:
 
 ```bash
 cd ~/video-organizer
 source venv/bin/activate
 
-# Run download script
+# Extract video URLs from /updates/ pages
+python3 sitemap_video_parser.py
+# Will prompt for:
+# - Domain (e.g., https://shinybound.com)
+# This creates list_video.txt with all current video URLs
+```
+
+### Download Videos
+
+```bash
+# Run download script (uses list_video.txt)
 python3 download.py
 # Will prompt for:
 # - Domain
@@ -184,7 +186,7 @@ python3 download.py
 ### Organize Videos for Jellyfin
 
 ```bash
-# Run unified organizer
+# Run unified organizer (uses list_video.txt)
 python3 unified_video_organizer.py
 # Will prompt for:
 # - Domain (e.g., https://shinybound.com)
@@ -192,7 +194,7 @@ python3 unified_video_organizer.py
 # - Tags folder (where symlinks will be created)
 
 # The script will:
-# 1. Automatically crawl all /updates/ pages 
+# 1. Read video URLs from list_video.txt
 # 2. Extract metadata from each video page
 # 3. Create organized folder structure with symlinks
 # 4. Download model images as folder.jpg
@@ -268,6 +270,9 @@ Create a simple update script:
 cd ~/video-organizer
 source venv/bin/activate
 
+echo "Extracting current video URLs..."
+python3 sitemap_video_parser.py
+
 echo "Starting video organization update..."
 
 # Run organizer (will skip existing files)
@@ -308,13 +313,19 @@ rsync -avz --copy-links ~/video-organizer/tags/ pi@pi-ip:/mnt/media/tags/
 
 **Model images not downloading:**
 - Check internet connection
-- Verify credentials are correct
+- Verify domain is accessible
 - Check Chrome/Selenium setup
 
 **Missing videos reported:**
 - Video titles may not match exactly
 - Check if videos are in subfolders
 - Verify video file extensions are supported
+- Run sitemap_video_parser.py again to get updated URL list
+
+**URL extraction issues:**
+- Check internet connection
+- Verify domain is accessible
+- Check if site structure has changed
 
 ### Performance Tips
 
@@ -342,14 +353,18 @@ The script can be extended to extract additional metadata fields by modifying th
 
 ### Batch Processing
 
-For large collections, consider running the organizer in batches:
+For large collections, consider running the scripts in sequence:
 
 ```bash
-# Process specific URL ranges
+# Extract all current video URLs first
+python3 sitemap_video_parser.py
+
+# Process specific URL ranges if needed
 head -100 list_video.txt > batch1.txt
-python3 unified_video_organizer.py  # Use batch1.txt as input
+tail -n +101 list_video.txt | head -100 > batch2.txt
+# Use batch files as needed for download.py
 ```
 
 ---
 
-This setup provides a robust, automated system for organizing video content with rich metadata for Jellyfin, optimized for a Raspberry Pi 5 server with all heavy processing done on a development machine.
+This setup provides a robust, automated system for organizing video content with rich metadata for Jellyfin, optimized for a Raspberry Pi 5 server with all heavy processing done on a development machine. The three-step workflow (extract URLs → download → organize) ensures reliable results and efficient processing.
