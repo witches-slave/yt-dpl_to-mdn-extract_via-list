@@ -255,6 +255,7 @@ def get_pagination_urls(driver, base_url):
 def extract_video_data_from_page(driver, domain):
     """Extract individual video page URLs and titles from an updates listing page"""
     video_data = []
+    seen_urls = set()  # Track URLs to avoid duplicates within the same page
     
     # Try multiple selectors to find video links
     selectors_to_try = [
@@ -273,6 +274,7 @@ def extract_video_data_from_page(driver, domain):
             if elements:
                 log_with_timestamp(f"  Using selector: {selector} (found {len(elements)} elements)")
                 
+                elements_processed = 0
                 for element in elements:
                     try:
                         href = element.get_attribute("href")
@@ -285,6 +287,13 @@ def extract_video_data_from_page(driver, domain):
                             
                             # Avoid duplicate main updates page
                             if not href.endswith(("/updates", "/updates/")):
+                                # Skip if we've already processed this URL on this page
+                                if href in seen_urls:
+                                    continue
+                                
+                                seen_urls.add(href)
+                                elements_processed += 1
+                                
                                 # Try to extract title from the element
                                 title = None
                                 
@@ -321,10 +330,13 @@ def extract_video_data_from_page(driver, domain):
                                 })
                     except Exception as e:
                         continue
+                
+                log_with_timestamp(f"    → Processed {elements_processed} unique videos from this selector")
                 break  # Use first working selector
         except Exception as e:
             continue
     
+    log_with_timestamp(f"  Total unique videos extracted from page: {len(video_data)}")
     return video_data
 
 def create_url_title(url):

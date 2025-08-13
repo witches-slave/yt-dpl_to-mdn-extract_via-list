@@ -1027,16 +1027,45 @@ def parse_video_list(filename='list_video.txt'):
     
     return video_entries
 
-def check_for_duplicate_titles_in_folder(output_folder):
-    """Check for files with duplicate titles in the output folder and handle them"""
-    if not output_folder or not os.path.exists(output_folder):
+def detect_duplicate_titles_from_list(video_entries):
+    """Detect which titles are duplicates in the video list and mark them"""
+    log_with_timestamp("🔍 Analyzing video list for duplicate titles...")
+    
+    # Group entries by title (case-insensitive)
+    title_groups = {}
+    for entry in video_entries:
+        title = entry['title']
+        if title:  # Only process entries with titles
+            title_lower = title.lower()
+            if title_lower not in title_groups:
+                title_groups[title_lower] = []
+            title_groups[title_lower].append(entry)
+    
+    # Mark duplicates
+    duplicate_titles = set()
+    for title_lower, entries in title_groups.items():
+        if len(entries) > 1:
+            duplicate_titles.add(title_lower)
+            log_with_timestamp(f"  🔄 Duplicate title detected: '{entries[0]['title']}' ({len(entries)} videos)")
+            for entry in entries:
+                log_with_timestamp(f"    • {entry['url']}")
+    
+    if duplicate_titles:
+        log_with_timestamp(f"✅ Found {len(duplicate_titles)} duplicate title groups")
+    else:
+        log_with_timestamp("✅ No duplicate titles found in video list")
+    
+    return duplicate_titles
+
+def remove_files_with_duplicate_titles(output_folder, duplicate_titles):
+    """Remove existing files that have duplicate titles to allow proper re-download"""
+    if not output_folder or not os.path.exists(output_folder) or not duplicate_titles:
         return []
     
-    log_with_timestamp("🔍 Checking for duplicate video titles in output folder...")
+    log_with_timestamp("�️  Removing existing files with duplicate titles...")
     
     video_extensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v']
-    title_counts = {}
-    all_files = []
+    removed_files = []
     
     try:
         files = os.listdir(output_folder)
@@ -1046,37 +1075,64 @@ def check_for_duplicate_titles_in_folder(output_folder):
                 # Check if file is a video
                 for ext in video_extensions:
                     if file.lower().endswith(ext.lower()):
-                        title = os.path.splitext(file)[0].lower()
-                        if title not in title_counts:
-                            title_counts[title] = []
-                        title_counts[title].append(file_path)
-                        all_files.append(file_path)
+                        file_title = os.path.splitext(file)[0].lower()
+                        # Check if this file's title matches any duplicate title
+                        if file_title in duplicate_titles:
+                            try:
+                                os.remove(file_path)
+                                removed_files.append(file_path)
+                                log_with_timestamp(f"  ✅ Removed duplicate: {os.path.basename(file_path)}")
+                            except Exception as e:
+                                log_with_timestamp(f"  ❌ Failed to remove {os.path.basename(file_path)}: {e}")
                         break
     except Exception as e:
         log_with_timestamp(f"Error checking folder: {e}")
         return []
     
-    # Find duplicates
-    duplicate_files = []
-    for title, files in title_counts.items():
-        if len(files) > 1:
-            log_with_timestamp(f"  ⚠️  Found {len(files)} files with duplicate title: '{title}'")
-            for file_path in files:
-                log_with_timestamp(f"    - {os.path.basename(file_path)}")
-                duplicate_files.append(file_path)
-    
-    if duplicate_files:
-        log_with_timestamp(f"🗑️  Removing {len(duplicate_files)} duplicate files to allow proper re-download...")
-        for file_path in duplicate_files:
-            try:
-                os.remove(file_path)
-                log_with_timestamp(f"  ✅ Removed: {os.path.basename(file_path)}")
-            except Exception as e:
-                log_with_timestamp(f"  ❌ Failed to remove {os.path.basename(file_path)}: {e}")
+    if removed_files:
+        log_with_timestamp(f"🗑️  Removed {len(removed_files)} files with duplicate titles")
     else:
-        log_with_timestamp("✅ No duplicate titles found in output folder")
+        log_with_timestamp("✅ No existing files with duplicate titles found")
     
-    return duplicate_files
+    return removed_files
+
+def should_use_url_title(entry, duplicate_titles):
+    """Determine if this entry should use URL-based title (because it's a duplicate)"""
+    if not entry['title']:
+        return False
+    
+    title_lower = entry['title'].lower()
+    return title_lower in duplicate_titles
+
+def get_final_title_for_download(entry, duplicate_titles):
+    """Get the final title to use for downloading (normal or URL-based)"""
+    if should_use_url_title(entry, duplicate_titles):
+        # This is a duplicate, so the title should already be the URL-based title
+        # from the sitemap parser, but verify it looks URL-based
+        title = entry['title']
+        if title and title.isupper() and ' ' in title:
+            log_with_timestamp(f"  📝 Using URL-based title for duplicate: {title}")
+            return title
+        else:
+            # Fallback: create URL-based title from URL
+            url_title = create_url_title_from_url(entry['url'])
+            log_with_timestamp(f"  📝 Creating URL-based title from URL: {url_title}")
+            return url_title
+    else:
+        # Normal title
+        return entry['title']
+
+def create_url_title_from_url(url):
+    """Create a title from URL (same logic as sitemap parser)"""
+    try:
+        if "/updates/" in url:
+            url_part = url.split("/updates/")[1]
+            url_part = url_part.split('?')[0].rstrip('/')
+            url_title = url_part.replace('-', ' ').upper()
+            return url_title
+    except Exception:
+        pass
+    return "UNKNOWN VIDEO"
 
 def is_manifest_url(url):
     """Check if URL is already a manifest URL"""
@@ -1102,9 +1158,6 @@ def main():
     # Get output folder
     output_folder = get_output_folder()
     
-    # Check for and handle duplicate titles in output folder
-    check_for_duplicate_titles_in_folder(output_folder)
-    
     # Save output folder info for other scripts to use
     try:
         with open(".download_config.txt", "w") as f:
@@ -1116,6 +1169,12 @@ def main():
 
     # Parse video entries from list_video.txt
     video_entries = parse_video_list()
+    
+    # Detect which titles are duplicates in the video list
+    duplicate_titles = detect_duplicate_titles_from_list(video_entries)
+    
+    # Remove existing files with duplicate titles to allow proper re-download
+    remove_files_with_duplicate_titles(output_folder, duplicate_titles)
 
     if dry_run:
         log_with_timestamp(f"🔍 DRY-RUN: Would process {len(video_entries)} video entries")
@@ -1123,7 +1182,8 @@ def main():
         log_with_timestamp(f"🔍 DRY-RUN: Would authenticate with domain: {domain}")
         # Show some examples
         for i, entry in enumerate(video_entries[:5]):
-            title_info = f" (Title: {entry['title']})" if entry['title'] else " (No title provided)"
+            final_title = get_final_title_for_download(entry, duplicate_titles)
+            title_info = f" (Final title: {final_title})" if final_title else " (No title)"
             log_with_timestamp(f"  Entry {i+1}: {entry['url']}{title_info}")
         if len(video_entries) > 5:
             log_with_timestamp(f"  ... and {len(video_entries) - 5} more entries")
@@ -1164,9 +1224,12 @@ def main():
             url = entry['url']
             pre_extracted_title = entry['title']  # Title from sitemap parser
             
+            # Determine the final title to use (handles duplicates)
+            final_title = get_final_title_for_download(entry, duplicate_titles)
+            
             log_separator()
             log_section_break()
-            title_info = f" (Pre-extracted title: {pre_extracted_title})" if pre_extracted_title else ""
+            title_info = f" (Final title: {final_title})" if final_title else ""
             log_with_timestamp(f"Processing entry {i+1}/{len(video_entries)}: {url}{title_info}")
             log_section_break()
             
@@ -1174,7 +1237,7 @@ def main():
                 # Direct manifest URL - use it directly
                 log_with_timestamp("✓ Direct manifest URL detected, using directly")
                 manifest_url = url
-                video_title = pre_extracted_title  # Use pre-extracted title if available
+                video_title = final_title  # Use final title
             else:
                 # Page URL - OPTIMIZATION: Extract title and manifest URL in single page load
                 log_with_timestamp("Page URL detected, processing video page...")
@@ -1193,8 +1256,8 @@ def main():
                     i += 1
                     continue
                 
-                # Use pre-extracted title if we have it, otherwise use extracted title
-                video_title = pre_extracted_title or extracted_title
+                # Use final title (which handles duplicates properly)
+                video_title = final_title or extracted_title
                 
                 # Check if file already exists after determining the title
                 if video_title and check_file_exists(video_title, output_folder):
