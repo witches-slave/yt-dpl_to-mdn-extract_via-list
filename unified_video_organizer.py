@@ -14,7 +14,6 @@ import os
 import sys
 import time
 import requests
-import xml.etree.ElementTree as ET
 from urllib.parse import urlparse, urljoin
 from seleniumwire import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -54,30 +53,22 @@ def get_user_inputs():
         domain = 'https://' + domain
     domain = domain.rstrip('/')
     
-    print()
-    print("Please select the video folder:")
-    print("1. Current directory (./)")
-    print("2. Custom folder")
-    
-    while True:
-        choice = input("Enter choice (1-2): ").strip()
-        if choice == "1":
-            video_folder = "."
-            break
-        elif choice == "2":
-            video_folder = input("Enter custom folder path: ").strip()
-            if not video_folder:
-                print("Error: Folder path cannot be empty")
-                continue
-            break
-        else:
-            print("Invalid choice. Please enter 1 or 2.")
+    # Get source folder path
+    video_folder = input("Enter the source folder path (where your videos are stored): ").strip()
+    if not video_folder:
+        print("Error: Source folder path cannot be empty")
+        sys.exit(1)
     
     # Expand paths
     video_folder = os.path.abspath(video_folder)
     
+    # Check if folder exists
+    if not os.path.exists(video_folder):
+        print(f"Error: Source folder does not exist: {video_folder}")
+        sys.exit(1)
+    
     print(f"\nDomain: {domain}")
-    print(f"Video folder: {video_folder}")
+    print(f"Source folder: {video_folder}")
     print("="*60 + "\n")
     
     return domain, video_folder
@@ -102,63 +93,7 @@ def setup_headless_browser():
         log_with_timestamp(f"Error setting up browser: {e}")
         return None
 
-# ===== SITEMAP AND VIDEO URL EXTRACTION =====
-
-def download_sitemap(sitemap_url):
-    """Download sitemap from URL"""
-    try:
-        log_with_timestamp(f"Downloading sitemap from: {sitemap_url}")
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(sitemap_url, headers=headers, timeout=30)
-        response.raise_for_status()
-        log_with_timestamp(f"Sitemap downloaded successfully ({len(response.content)} bytes)")
-        return response.text
-    except requests.RequestException as e:
-        log_with_timestamp(f"Error downloading sitemap: {e}")
-        return None
-
-def extract_video_urls_from_sitemap(xml_content, domain):
-    """Extract all URLs containing '/updates/' from sitemap XML"""
-    try:
-        log_with_timestamp("Parsing sitemap XML content...")
-        
-        # Parse XML
-        root = ET.fromstring(xml_content)
-        
-        # Define namespace
-        namespace = {'ns': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
-        
-        # Find all URL elements
-        url_elements = root.findall('.//ns:url', namespace)
-        log_with_timestamp(f"Found {len(url_elements)} total URLs in sitemap")
-        
-        # Extract URLs containing '/updates/'
-        video_urls = []
-        main_updates_url = f"{domain}/updates"
-        
-        for url_elem in url_elements:
-            loc_elem = url_elem.find('ns:loc', namespace)
-            if loc_elem is not None:
-                url = loc_elem.text.strip()
-                if '/updates/' in url and url != main_updates_url:
-                    # Skip the main updates page, only include specific update pages
-                    video_urls.append(url)
-        
-        log_with_timestamp(f"Found {len(video_urls)} video URLs from sitemap")
-        
-        # Sort URLs for consistent output
-        video_urls.sort()
-        
-        return video_urls
-        
-    except ET.ParseError as e:
-        log_with_timestamp(f"Error parsing XML: {e}")
-        return []
-    except Exception as e:
-        log_with_timestamp(f"Error extracting URLs: {e}")
-        return []
+# ===== VIDEO URL EXTRACTION =====
 
 def get_pagination_urls(driver, base_url):
     """Get all pagination URLs for updates pages - generates ALL pages from 1 to last"""
@@ -330,7 +265,7 @@ def extract_video_urls_from_page(driver, domain):
 
 def crawl_updates_pages_manually(domain):
     """Manually crawl /updates/ pages to find video URLs"""
-    log_with_timestamp("🕷️  No sitemap found - starting manual crawling of /updates/ pages")
+    log_with_timestamp("🕷️  Starting manual crawling of /updates/ pages")
     
     driver = setup_headless_browser()
     if not driver:
@@ -383,27 +318,16 @@ def crawl_updates_pages_manually(domain):
         driver.quit()
 
 def get_all_video_urls(domain):
-    """Get all video URLs from sitemap or manual crawling"""
-    log_with_timestamp("🔍 Starting video URL discovery...")
+    """Get all video URLs via manual crawling of /updates/ pages"""
+    log_with_timestamp("🔍 Starting video URL discovery via manual crawling...")
     
-    # Try sitemap first
-    sitemap_url = f"{domain}/sitemap.xml"
-    xml_content = download_sitemap(sitemap_url)
-    
-    if xml_content:
-        video_urls = extract_video_urls_from_sitemap(xml_content, domain)
-        if video_urls:
-            log_with_timestamp(f"✅ Found {len(video_urls)} video URLs from sitemap")
-            return video_urls
-    
-    # Fallback to manual crawling
-    log_with_timestamp("⚠️  Sitemap method failed, switching to manual crawling")
     video_urls = crawl_updates_pages_manually(domain)
     
     if not video_urls:
-        log_with_timestamp("❌ No video URLs found through any method")
+        log_with_timestamp("❌ No video URLs found")
         return []
     
+    log_with_timestamp(f"✅ Found {len(video_urls)} video URLs")
     return video_urls
 
 # ===== VIDEO METADATA EXTRACTION =====
