@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-Video Sitemap Parser Script
-Parses a sitemap XML file and extracts all URLs containing '/updates/' 
-to create a list_video.txt file for the video downloader script.
-If no sitemap is found, falls back to manual crawling of /updates/ pages.
+Video URL Parser Script
+Crawls /updates/ pages and extracts all video URLs to create a list_video.txt file 
+for the video downloader script. This ensures we get only live, current video links
+and avoids dead links that might be in sitemaps.
 """
 
-import xml.etree.ElementTree as ET
 import requests
 import sys
 import re
@@ -30,35 +29,10 @@ def log_separator():
     """Print a clean separator line without timestamp"""
     print()
 
-def get_domain_input():
-    """Get domain from user input"""
-    print("=" * 60)
-    print("SITEMAP VIDEO PARSER")
-    print("=" * 60)
-    print()
-    
-    # Get domain
-    domain = input("Enter the domain (e.g., shinybound.com or https://shinybound.com): ").strip()
-    if not domain:
-        print("Error: Domain cannot be empty")
-        sys.exit(1)
-    
-    # Add https:// if not present
-    if not domain.startswith(('http://', 'https://')):
-        domain = 'https://' + domain
-    
-    # Remove trailing slash if present
-    domain = domain.rstrip('/')
-    
-    print(f"\nUsing domain: {domain}")
-    print("="*60 + "\n")
-    
-    return domain
-
 def get_user_inputs():
     """Get domain input from user"""
     print("=" * 60)
-    print("SITEMAP VIDEO PARSER - DOMAIN CONFIGURATION")
+    print("VIDEO URL PARSER - CRAWLING /UPDATES/ PAGES")
     print("=" * 60)
     
     # Get domain
@@ -99,13 +73,13 @@ def setup_headless_browser():
         log_with_timestamp(f"Error setting up browser: {e}")
         return None
 
-def crawl_updates_pages_manually(domain):
-    """Manually crawl /updates/ pages to find video URLs"""
-    log_with_timestamp("🕷️  No sitemap found - starting manual crawling of /updates/ pages")
+def crawl_updates_pages(domain):
+    """Crawl /updates/ pages to find all current video URLs"""
+    log_with_timestamp("🕷️  Starting crawling of /updates/ pages")
     
     driver = setup_headless_browser()
     if not driver:
-        log_with_timestamp("Failed to setup browser for manual crawling")
+        log_with_timestamp("Failed to setup browser for crawling")
         return []
     
     all_video_urls = []
@@ -147,7 +121,7 @@ def crawl_updates_pages_manually(domain):
                 unique_urls.append(url)
                 seen.add(url)
         
-        log_with_timestamp(f"🎯 Manual crawling complete: found {len(unique_urls)} unique video URLs")
+        log_with_timestamp(f"🎯 Crawling complete: found {len(unique_urls)} unique video URLs")
         return unique_urls
         
     finally:
@@ -322,99 +296,6 @@ def extract_video_urls_from_page(driver, domain):
     unique_urls = list(set(video_urls))
     return unique_urls
 
-def manual_crawl_fallback(domain):
-    """Fallback to manual crawling when sitemap is not available"""
-    log_with_timestamp("📍 Sitemap method failed, switching to manual crawling mode")
-    log_with_timestamp("This will take longer but should find all videos on the site")
-    
-    # Ask user for confirmation
-    print("\nManual crawling will:")
-    print("• Visit the /updates/ page(s)")
-    print("• Extract all video links from pagination")
-    print("• May take several minutes depending on site size")
-    print()
-    
-    confirm = input("Proceed with manual crawling? (y/N): ").strip().lower()
-    if confirm not in ['y', 'yes']:
-        log_with_timestamp("Manual crawling cancelled by user")
-        return []
-    
-    log_separator()
-    return crawl_updates_pages_manually(domain)
-
-def download_sitemap(sitemap_url):
-    """Download sitemap from URL"""
-    try:
-        log_with_timestamp(f"Downloading sitemap from: {sitemap_url}")
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(sitemap_url, headers=headers, timeout=30)
-        response.raise_for_status()
-        log_with_timestamp(f"Sitemap downloaded successfully ({len(response.content)} bytes)")
-        return response.text
-    except requests.RequestException as e:
-        log_with_timestamp(f"Error downloading sitemap: {e}")
-        return None
-
-def parse_sitemap_file(file_path):
-    """Parse sitemap from local file"""
-    try:
-        log_with_timestamp(f"Reading sitemap from file: {file_path}")
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        log_with_timestamp("Sitemap file read successfully")
-        return content
-    except FileNotFoundError:
-        log_with_timestamp(f"Error: Sitemap file not found: {file_path}")
-        return None
-    except Exception as e:
-        log_with_timestamp(f"Error reading sitemap file: {e}")
-        return None
-
-def extract_update_urls(xml_content, domain):
-    """Extract all URLs containing '/updates/' from sitemap XML"""
-    try:
-        log_with_timestamp("Parsing XML content...")
-        
-        # Parse XML
-        root = ET.fromstring(xml_content)
-        
-        # Define namespace
-        namespace = {'ns': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
-        
-        # Find all URL elements
-        urls = []
-        url_elements = root.findall('.//ns:url', namespace)
-        
-        log_with_timestamp(f"Found {len(url_elements)} total URLs in sitemap")
-        
-        # Extract URLs containing '/updates/'
-        update_urls = []
-        main_updates_url = f"{domain}/updates"
-        
-        for url_elem in url_elements:
-            loc_elem = url_elem.find('ns:loc', namespace)
-            if loc_elem is not None:
-                url = loc_elem.text.strip()
-                if '/updates/' in url and url != main_updates_url:
-                    # Skip the main updates page, only include specific update pages
-                    update_urls.append(url)
-        
-        log_with_timestamp(f"Found {len(update_urls)} URLs containing '/updates/'")
-        
-        # Sort URLs for consistent output
-        update_urls.sort()
-        
-        return update_urls
-        
-    except ET.ParseError as e:
-        log_with_timestamp(f"Error parsing XML: {e}")
-        return []
-    except Exception as e:
-        log_with_timestamp(f"Error extracting URLs: {e}")
-        return []
-
 def write_list_file(urls, output_file='list_video.txt'):
     """Write URLs to list_video.txt file"""
     try:
@@ -433,59 +314,26 @@ def write_list_file(urls, output_file='list_video.txt'):
 
 def main():
     """Main function"""
-    log_with_timestamp("Starting sitemap parser...")
+    log_with_timestamp("Starting video URL parser...")
     
     # Get user input for domain
-    domain = get_domain_input()
+    domain = get_user_inputs()
     
-    # Check if user provided a command line argument for custom sitemap location
-    if len(sys.argv) >= 2:
-        input_source = sys.argv[1]
-        log_with_timestamp(f"Using provided sitemap source: {input_source}")
-        force_sitemap = True
-    else:
-        # Construct sitemap URL from domain
-        input_source = f"{domain}/sitemap.xml"
-        log_with_timestamp(f"Trying default sitemap URL: {input_source}")
-        force_sitemap = False
-        print("Note: You can also provide a custom sitemap URL or file as a command line argument")
-        print(f"Usage: python {sys.argv[0]} <sitemap_url_or_file>")
-        print()
+    # Crawl /updates/ pages to find all video URLs
+    video_urls = crawl_updates_pages(domain)
     
-    update_urls = []
-    
-    # Try sitemap method first
-    if input_source.startswith('http://') or input_source.startswith('https://'):
-        # Download from URL
-        xml_content = download_sitemap(input_source)
-        if xml_content:
-            update_urls = extract_update_urls(xml_content, domain)
-    else:
-        # Read from local file
-        xml_content = parse_sitemap_file(input_source)
-        if xml_content:
-            update_urls = extract_update_urls(xml_content, domain)
-    
-    # If sitemap method failed and user didn't force a specific sitemap, try manual crawling
-    if not update_urls and not force_sitemap:
-        log_with_timestamp("⚠️  Sitemap method unsuccessful")
-        update_urls = manual_crawl_fallback(domain)
-    elif not update_urls and force_sitemap:
-        log_with_timestamp("❌ Failed to extract URLs from specified sitemap")
-        sys.exit(1)
-    
-    if not update_urls:
-        log_with_timestamp("❌ No video URLs found through any method")
+    if not video_urls:
+        log_with_timestamp("❌ No video URLs found")
         log_with_timestamp("💡 Possible solutions:")
         log_with_timestamp("   • Check if the domain is correct")
-        log_with_timestamp("   • Try a different sitemap URL")
         log_with_timestamp("   • Check if the site has /updates/ pages")
+        log_with_timestamp("   • Check if there are any videos on the site")
         sys.exit(1)
     
     # Write to list_video.txt
-    if write_list_file(update_urls):
+    if write_list_file(video_urls):
         log_with_timestamp("✅ Video URL extraction completed successfully!")
-        log_with_timestamp(f"Found and saved {len(update_urls)} video URLs")
+        log_with_timestamp(f"Found and saved {len(video_urls)} video URLs")
         log_with_timestamp(f"Next step: Run 'python3 download.py' to download the videos")
     else:
         log_with_timestamp("❌ Failed to write video list file")

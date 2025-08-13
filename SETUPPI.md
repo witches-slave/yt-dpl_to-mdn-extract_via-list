@@ -1,14 +1,14 @@
-# Raspberry Pi 5 + Ubuntu Server 24 + Jellyfin Media Server Setup Guide
+# Raspberry Pi 5 + Jellyfin Server Setup Guide
 
-This comprehensive guide will help you set up a Raspberry Pi 5 with Ubuntu Server 24.04 LTS as a dedicated Jellyfin media server for your downloaded video collection.
+Complete guide for setting up a Raspberry Pi 5 as a dedicated Jellyfin media server for your organized video collection.
 
-## Table of Contents
-1. [Hardware Requirements](#hardware-requirements)
-2. [Ubuntu Server 24.04 Installation](#ubuntu-server-2404-installation)
-3. [Initial System Configuration](#initial-system-configuration)
-4. [Network Configuration](#network-configuration)
-5. [Storage Configuration](#storage-configuration)
-6. [Jellyfin Installation](#jellyfin-installation)
+## Hardware Requirements
+
+- **Raspberry Pi 5** (4GB+ RAM recommended)
+- **High-quality SD card** (64GB+ Class 10 or better, Samsung EVO/SanDisk Extreme recommended)
+- **External NTFS drive** for media storage (USB 3.0+ recommended)
+- **Reliable power supply** (official Pi 5 power supply recommended)
+- **Ethernet connection** (preferred over WiFi for stability)
 7. [Integration with Tag Organization System](#integration-with-tag-organization-system)
 8. [Performance Optimization](#performance-optimization)
 9. [Security Hardening](#security-hardening)
@@ -552,20 +552,21 @@ External NTFS Drive (large storage):
 
 ### Step 4: Jellyfin Library Configuration
 
-**Understanding the Tag Organization System:**
+**Understanding the Unified Video Organization System:**
 
-The `tag_organizer.py` script creates a sophisticated folder structure using symlinks to organize your videos without duplicating files. Here's how it works:
+The `unified_video_organizer.py` script creates a sophisticated folder structure using symlinks to organize your videos without duplicating files. Here's how it works:
 
 1. **Source videos** remain in their original download folders (e.g., `sourcefolder/`, `sourcefolder2/`)
-2. **Symlinks** are created in the `tags/` folder pointing to the original files
-3. **Organization structure** created by tag_organizer.py:
+2. **Automatic page crawling** - script discovers all videos by crawling /updates/ pages automatically
+3. **Symlinks** are created in the `tags/` folder pointing to the original files
+4. **Organization structure** created by unified_video_organizer.py:
 
 ```
 /media/jellyfin/
 ├── sourcefolder/               # Original downloaded videos
 ├── sourcefolder2/              # More original videos
 ├── movies/                     # Movies (if any)
-└── tags/                       # Organized symlinks (created by tag_organizer.py)
+└── tags/                       # Organized symlinks (created by unified_video_organizer.py)
     ├── tag [TagName]/          # Videos with specific tags (e.g., "tag BDSM")
     ├── model [ModelName]/      # Videos featuring specific models (e.g., "model Jane Doe")
     ├── tag no tag/             # Videos without any tags
@@ -602,17 +603,17 @@ The `tag_organizer.py` script creates a sophisticated folder structure using sym
    - Set content type appropriately for each library
    - Configure metadata providers as needed
 
-**How the Tag Organization Works:**
+**How the Unified Video Organization Works:**
 
 1. **Download Phase** (done on development machine):
    - Videos are downloaded to source folders like `sourcefolder/`, `sourcefolder2/`
    - Each video keeps its original filename and location
 
 2. **Organization Phase** (done on development machine):
-   - `tag_organizer.py` reads `list_tag.txt` (created by `sitemap_tag_parser.py`)
-   - Script crawls each tag/model page to find which videos belong to each tag
+   - `unified_video_organizer.py` automatically crawls all /updates/ pages
+   - Script extracts metadata from each video page (tags, models, related videos)
    - Creates **relative symlinks** in `tags/` folder pointing to original videos
-   - **Downloads model preview images** automatically (only for model folders, not tag folders)
+   - **Downloads model preview images** automatically (for model folders)
    - **Creates NFO metadata files** for each video with all its tags for Jellyfin filtering
    - No videos are moved or duplicated - only symlinks are created
 
@@ -672,7 +673,7 @@ All folders show the same videos, but organized differently for easy browsing!
 1. **Setup environment** on development machine (see README.md):
    - Install Python, Chrome, Selenium dependencies
    - Clone repository and setup virtual environment
-   - Configure download scripts and tag lists
+   - Configure download scripts
 
 2. **Download and organize workflow**:
    ```bash
@@ -684,8 +685,11 @@ All folders show the same videos, but organized differently for easy browsing!
    python3 download.py
    
    # Organize with relative symlinks (portable across machines)
-   python3 tag_organizer.py
-   # When prompted, select your NTFS drive's media folder
+   python3 unified_video_organizer.py
+   # When prompted, specify:
+   # - Domain (e.g., https://shinybound.com)
+   # - Source video folder (where downloads are)
+   # - Tags folder (where symlinks will be created)
    ```
 
 3. **Deploy to Pi**:
@@ -946,8 +950,8 @@ cd /media/jellyfin/scripts
 **Development Machine** (where all the work happens):
 1. ✅ **Setup scripts** following the main `README.md` instructions
 2. ✅ **Download videos** using your configured download scripts  
-3. ✅ **Organize with relative symlinks** using updated `tag_organizer.py`
-4. ✅ **Content ready** - NTFS drive contains organized media with portable symlinks
+3. ✅ **Organize with relative symlinks** using `unified_video_organizer.py` (auto-crawls /updates/ pages)
+4. ✅ **Content ready** - Tags folder contains organized media with portable symlinks
 
 **Raspberry Pi** (clean media server):
 1. ✅ **Connect NTFS drive** → Content immediately available

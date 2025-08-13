@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Unified Video Organizer Script
-Combines video sitemap parsing and organization into a single workflow:
-1. Fetches all video URLs from sitemap or manual crawling of /updates/ pages
+Combines video list processing and organization into a single workflow:
+1. Reads video URLs from list_video.txt (created by sitemap_video_parser.py)
 2. Extracts comprehensive metadata from each video page (thumbnail, tags, model, description, related videos)
 3. Downloads video thumbnails and model images
 4. Creates relative symlinks for videos organized by tags and models
@@ -91,6 +91,26 @@ def get_user_inputs():
     print("=" * 60)
     print()
     
+    # Check if list_video.txt exists
+    if not os.path.exists("list_video.txt"):
+        print("❌ ERROR: list_video.txt not found in the current directory.")
+        print("💡 SOLUTION: Run 'python3 sitemap_video_parser.py' first to generate the video list.")
+        print("   This script extracts video URLs from the sitemap and creates list_video.txt")
+        sys.exit(1)
+    
+    # Check if list_video.txt is empty
+    try:
+        with open("list_video.txt", "r") as f:
+            lines = [line.strip() for line in f if line.strip()]
+            if not lines:
+                print("❌ ERROR: list_video.txt is empty.")
+                print("💡 SOLUTION: Run 'python3 sitemap_video_parser.py' to populate the video list.")
+                sys.exit(1)
+            print(f"✅ Found {len(lines)} video URLs in list_video.txt")
+    except Exception as e:
+        print(f"❌ ERROR: Could not read list_video.txt: {e}")
+        sys.exit(1)
+    
     # Get domain
     domain = input("Enter the domain (e.g., https://shinybound.com): ").strip()
     if not domain:
@@ -105,22 +125,33 @@ def get_user_inputs():
     # Get source folder path
     video_folder = input("Enter the source folder path (where your videos are stored): ").strip()
     if not video_folder:
-        print("Error: Source folder path cannot be empty")
+        print("Error: Video folder cannot be empty")
         sys.exit(1)
+    
+    if not os.path.exists(video_folder):
+        print(f"Error: Video folder does not exist: {video_folder}")
+        sys.exit(1)
+    
+    # Get target tags folder (where symlinks will be created)
+    organization_folder = input("Enter the tags folder path (where symlinks will be created): ").strip()
+    if not organization_folder:
+        print("Error: Tags folder cannot be empty")
+        sys.exit(1)
+    
+    # Create tags folder if it doesn't exist
+    os.makedirs(organization_folder, exist_ok=True)
     
     # Expand paths
     video_folder = os.path.abspath(video_folder)
-    
-    # Check if folder exists
-    if not os.path.exists(video_folder):
-        print(f"Error: Source folder does not exist: {video_folder}")
-        sys.exit(1)
+    organization_folder = os.path.abspath(organization_folder)
     
     print(f"\nDomain: {domain}")
     print(f"Source folder: {video_folder}")
+    print(f"Tags folder: {organization_folder}")
+    print(f"Video URLs: {len(lines)} videos from list_video.txt")
     print("="*60 + "\n")
     
-    return domain, video_folder
+    return domain, video_folder, organization_folder
 
 def setup_headless_browser():
     """Setup headless Chrome browser"""
@@ -312,9 +343,23 @@ def extract_video_urls_from_page(driver, domain):
     unique_urls = list(set(video_urls))
     return unique_urls
 
-def process_videos_from_updates_pages(domain, video_folder):
-    """Process videos page by page from /updates/ pages"""
-    log_with_timestamp("🕷️  Starting page-by-page video processing from /updates/ pages")
+def process_videos_from_list(domain, video_folder, organization_folder):
+    """Process videos from list_video.txt file"""
+    log_with_timestamp("🕷️  Starting video processing from list_video.txt")
+    
+    # Read video URLs from list_video.txt
+    try:
+        with open("list_video.txt", "r") as f:
+            video_urls = [line.strip() for line in f if line.strip()]
+    except Exception as e:
+        log_with_timestamp(f"Error reading list_video.txt: {e}")
+        return [], []
+    
+    if not video_urls:
+        log_with_timestamp("No video URLs found in list_video.txt")
+        return [], []
+    
+    log_with_timestamp(f"Found {len(video_urls)} video URLs to process")
     
     driver = setup_headless_browser()
     if not driver:
@@ -323,78 +368,54 @@ def process_videos_from_updates_pages(domain, video_folder):
     
     processed_videos = []
     missing_videos = []
-    base_updates_url = f"{domain}/updates"
+    processed_models = {}  # Cache for model images to avoid re-downloading
     
     try:
-        # Start with the main updates page
-        log_with_timestamp(f"Loading updates page: {base_updates_url}")
-        driver.get(base_updates_url)
-        time.sleep(3)
-        
-        # Get pagination info
-        pagination_urls = get_pagination_urls(driver, base_updates_url)
-        log_with_timestamp(f"Found {len(pagination_urls)} update pages to process")
-        
-        # Process each page immediately
-        for i, page_url in enumerate(pagination_urls, 1):
-            log_with_timestamp(f"\n📄 Processing page {i}/{len(pagination_urls)}: {page_url}")
+        # Process each video URL
+        for i, video_url in enumerate(video_urls, 1):
+            log_with_timestamp(f"\n🎬 Processing video {i}/{len(video_urls)}")
+            log_with_timestamp(f"     URL: {video_url}")
             
-            try:
-                driver.get(page_url)
-                time.sleep(2)
+            # Extract metadata
+            metadata = extract_video_metadata(driver, video_url)
+            if metadata:
+                video_title = metadata.get('title', 'Unknown')
+                log_with_timestamp(f"     ✅ Title: {video_title}")
+                log_with_timestamp(f"        Model: {metadata.get('model', 'Unknown')}")
+                log_with_timestamp(f"        Tags: {len(metadata.get('tags', []))} tags")
                 
-                # Extract video URLs from this page
-                video_urls = extract_video_urls_from_page(driver, domain)
-                log_with_timestamp(f"  Found {len(video_urls)} videos on this page")
-                
-                # Process each video immediately
-                for j, video_url in enumerate(video_urls, 1):
-                    log_with_timestamp(f"\n  🎬 Processing video {j}/{len(video_urls)} from page {i}")
-                    log_with_timestamp(f"     URL: {video_url}")
-                    
-                    # Extract metadata
-                    metadata = extract_video_metadata(driver, video_url)
-                    if metadata:
-                        video_title = metadata.get('title', 'Unknown')
-                        log_with_timestamp(f"     ✅ Title: {video_title}")
-                        log_with_timestamp(f"        Model: {metadata.get('model', 'Unknown')}")
-                        log_with_timestamp(f"        Tags: {len(metadata.get('tags', []))} tags")
-                        
-                        # Try to organize this video immediately
-                        video_file = find_video_file(video_folder, video_title)
-                        if video_file:
-                            log_with_timestamp(f"        ✅ Found local file: {os.path.basename(video_file)}")
-                            processed_videos.append(metadata)
-                            # Organize this video
-                            organize_single_video(video_file, metadata, domain, driver)
-                        else:
-                            log_with_timestamp(f"        ❌ Local file not found")
-                            missing_videos.append({
-                                'title': video_title,
-                                'url': metadata.get('url', ''),
-                                'model': metadata.get('model', ''),
-                                'tags': metadata.get('tags', [])
-                            })
-                    else:
-                        log_with_timestamp(f"     ❌ Failed to extract metadata")
-                    
-                    # Small delay between videos
-                    time.sleep(1)
-                
-            except Exception as e:
-                log_with_timestamp(f"  ❌ Error processing page: {e}")
-                continue
+                # Try to organize this video immediately
+                video_file = find_video_file(video_folder, video_title)
+                if video_file:
+                    log_with_timestamp(f"        ✅ Found local file: {os.path.basename(video_file)}")
+                    processed_videos.append(metadata)
+                    # Organize this video with model cache
+                    organize_single_video(video_file, metadata, domain, driver, processed_models, organization_folder)
+                else:
+                    log_with_timestamp(f"        ❌ Local file not found")
+                    missing_videos.append({
+                        'title': video_title,
+                        'url': metadata.get('url', ''),
+                        'model': metadata.get('model', ''),
+                        'tags': metadata.get('tags', [])
+                    })
+            else:
+                log_with_timestamp(f"     ❌ Failed to extract metadata")
+            
+            # Small delay between videos
+            time.sleep(1)
         
-        log_with_timestamp(f"\n🎯 Page-by-page processing complete!")
+        log_with_timestamp(f"\n🎯 Video processing complete!")
         log_with_timestamp(f"   Processed: {len(processed_videos)} videos")
         log_with_timestamp(f"   Missing: {len(missing_videos)} videos")
+        log_with_timestamp(f"   Models processed: {len(processed_models)} unique models")
         
         return processed_videos, missing_videos
         
     finally:
         driver.quit()
 
-def organize_single_video(video_file, metadata, domain, driver=None):
+def organize_single_video(video_file, metadata, domain, driver=None, processed_models=None, organization_folder=None):
     """Organize a single video with its metadata"""
     try:
         video_title = metadata.get('title', '')
@@ -404,16 +425,26 @@ def organize_single_video(video_file, metadata, domain, driver=None):
         model = metadata.get('model', '').strip()
         model_image_url = None
         
-        # Get the video folder (parent directory of the video file)
-        video_folder = os.path.dirname(os.path.dirname(video_file))  # Go up one level from video file
+        # Use the provided organization folder instead of dynamically determining it
+        if not organization_folder:
+            # Fallback to old logic if no organization folder provided
+            video_folder_parent = os.path.dirname(video_file)
+            organization_folder = video_folder_parent
         
         if model:
             clean_model = re.sub(r'[^\w\s-]', '', model).strip()
-            model_dir = os.path.join(video_folder, clean_model)
+            model_dir = os.path.join(organization_folder, f"model {clean_model}")
             
-            # Extract model image URL if driver is available
-            if driver:
+            # Use model cache to avoid re-downloading
+            if processed_models is None:
+                processed_models = {}
+                
+            if model in processed_models:
+                model_image_url = processed_models[model]
+                log_with_timestamp(f"    ✅ Using cached model image")
+            elif driver:
                 model_image_url = extract_model_image_url(driver, model, domain)
+                processed_models[model] = model_image_url
                 
                 # Download model image as folder.jpg
                 if model_image_url:
@@ -421,9 +452,12 @@ def organize_single_video(video_file, metadata, domain, driver=None):
                     if not os.path.exists(folder_jpg_path):
                         if download_image(model_image_url, folder_jpg_path):
                             log_with_timestamp(f"    ✅ Downloaded model image")
+                        else:
+                            log_with_timestamp(f"    ⚠️  Failed to download model image")
                 
                 # Create actress NFO file
-                create_actress_nfo(model_dir, model, model_image_url)
+                if not create_actress_nfo(model_dir, model, model_image_url):
+                    log_with_timestamp(f"    ⚠️  Failed to create actress NFO")
                 
                 # Small delay to be respectful
                 time.sleep(1)
@@ -431,7 +465,7 @@ def organize_single_video(video_file, metadata, domain, driver=None):
             # Create model symlink
             model_link = os.path.join(model_dir, os.path.basename(video_file))
             if create_relative_symlink(video_file, model_link):
-                log_with_timestamp(f"    → Model symlink: {clean_model}")
+                log_with_timestamp(f"    → Model symlink: model {clean_model}")
         
         # Create NFO file with model image URL
         create_nfo_file(video_file, metadata, model_image_url)
@@ -446,11 +480,27 @@ def organize_single_video(video_file, metadata, domain, driver=None):
         for tag in metadata.get('tags', []):
             clean_tag = re.sub(r'[^\w\s-]', '', tag).strip()
             if clean_tag:
-                tag_dir = os.path.join(video_folder, clean_tag)
+                tag_dir = os.path.join(organization_folder, f"tag {clean_tag}")
                 tag_link = os.path.join(tag_dir, os.path.basename(video_file))
                 
                 if create_relative_symlink(video_file, tag_link):
-                    log_with_timestamp(f"    → Tag symlink: {clean_tag}")
+                    log_with_timestamp(f"    → Tag symlink: tag {clean_tag}")
+        
+        # Create source folder with all videos (using your original structure)
+        source_folder_name = f"source {os.path.basename(os.path.dirname(video_file))}"
+        source_dir = os.path.join(organization_folder, source_folder_name)
+        source_link = os.path.join(source_dir, os.path.basename(video_file))
+        
+        if create_relative_symlink(video_file, source_link):
+            log_with_timestamp(f"    → Source symlink: {source_folder_name}")
+        
+        # Create untagged folder if no tags
+        if not metadata.get('tags'):
+            no_tag_dir = os.path.join(organization_folder, "tag no tag")
+            no_tag_link = os.path.join(no_tag_dir, os.path.basename(video_file))
+            
+            if create_relative_symlink(video_file, no_tag_link):
+                log_with_timestamp(f"    → No tag symlink created")
         
         return True
         
@@ -1025,11 +1075,11 @@ def main():
     """Main function"""
     try:
         # Get user inputs
-        domain, video_folder = get_user_inputs()
+        domain, video_folder, organization_folder = get_user_inputs()
         
-        # Process videos page by page
-        log_with_timestamp("🚀 Starting page-by-page video processing...")
-        processed_videos, missing_videos = process_videos_from_updates_pages(domain, video_folder)
+        # Process videos from list
+        log_with_timestamp("🚀 Starting video processing from list_video.txt...")
+        processed_videos, missing_videos = process_videos_from_list(domain, video_folder, organization_folder)
         
         # Print final summary
         log_separator()
