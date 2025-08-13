@@ -237,33 +237,74 @@ def get_pagination_urls(driver, base_url, category):
             
             max_page = 1
             page_url_pattern = None
+            all_page_numbers = []
             
             for link in pagination_links:
                 try:
                     href = link.get_attribute("href")
                     text = link.text.strip()
                     
+                    # Extract page numbers from text
                     if text.isdigit():
                         page_num = int(text)
-                        max_page = max(max_page, page_num)
+                        all_page_numbers.append(page_num)
                         
-                        if page_num == 2 and not page_url_pattern:
-                            if "?page=2" in href:
-                                page_url_pattern = href.replace("?page=2", "?page={}")
-                            elif "/page/2" in href:
-                                page_url_pattern = href.replace("/page/2", "/page/{}")
+                        # Set URL pattern from any page link (prefer page 2)
+                        if page_num >= 2 and not page_url_pattern:
+                            if f"?page={page_num}" in href:
+                                page_url_pattern = href.replace(f"?page={page_num}", "?page={}")
+                            elif f"/page/{page_num}" in href:
+                                page_url_pattern = href.replace(f"/page/{page_num}", "/page/{}")
+                    
+                    # Also extract from href directly for higher page numbers
+                    if href and "page=" in href:
+                        try:
+                            page_match = re.search(r'page=(\d+)', href)
+                            if page_match:
+                                page_num = int(page_match.group(1))
+                                all_page_numbers.append(page_num)
+                                
+                                # Set URL pattern if not already set
+                                if not page_url_pattern:
+                                    if f"?page={page_num}" in href:
+                                        page_url_pattern = href.replace(f"?page={page_num}", "?page={}")
+                                    elif f"/page/{page_num}" in href:
+                                        page_url_pattern = href.replace(f"/page/{page_num}", "/page/{}")
+                        except:
+                            pass
                             
                 except Exception:
                     continue
             
-            # Generate URLs for all pages
+            # Find the maximum page number from all discovered pages
+            if all_page_numbers:
+                max_page = max(all_page_numbers)
+                log_with_timestamp(f"🔢 Found {category} pagination: discovered pages {sorted(set(all_page_numbers))}, max page: {max_page}")
+            
+            # If we still don't have a pattern, try to build one from base URL
+            if not page_url_pattern and max_page > 1:
+                if "?" in base_url:
+                    page_url_pattern = base_url + "&page={}"
+                else:
+                    page_url_pattern = base_url + "?page={}"
+            
+            # Generate URLs for all pages from 1 to max_page
             if page_url_pattern and max_page > 1:
-                log_with_timestamp(f"🔢 Found {category} pagination: pages 1 to {max_page}")
+                log_with_timestamp(f"� Generating {category} URLs for pages 1 to {max_page}")
+                log_with_timestamp(f"🔗 URL pattern: {page_url_pattern}")
                 
-                for page_num in range(2, max_page + 1):
-                    page_url = page_url_pattern.format(page_num)
-                    pagination_urls.append(page_url)
+                # Clear pagination_urls and rebuild with all pages
+                pagination_urls = []
+                
+                for page_num in range(1, max_page + 1):
+                    if page_num == 1:
+                        # Page 1 is usually the base URL
+                        pagination_urls.append(base_url)
+                    else:
+                        page_url = page_url_pattern.format(page_num)
+                        pagination_urls.append(page_url)
         
+        log_with_timestamp(f"✅ Generated {len(pagination_urls)} {category} page URLs")
         return pagination_urls
         
     except Exception as e:
