@@ -12,6 +12,7 @@ import time
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime
+from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -150,25 +151,160 @@ def find_matching_video(title, video_files):
     
     return None
 
-def crawl_tags_and_models(driver, domain):
-    """Crawl /tags/ and /models/ pages to get all tag/model URLs"""
-    log_with_timestamp("🕷️ Starting crawl of /tags/ and /models/ pages...")
+def get_video_urls_from_sitemap(domain):
+    """Extract video URLs from sitemap."""
+    log_with_timestamp("Getting video URLs from sitemap...")
     
-    all_tag_model_urls = []
+    video_urls = set()
     
-    # Crawl tags
-    tags_urls = crawl_category_pages(driver, domain, "tags")
-    all_tag_model_urls.extend(tags_urls)
+    # Get sitemap index
+    sitemap_index_url = f"{domain}/sitemap.xml"
     
-    # Crawl models
-    models_urls = crawl_category_pages(driver, domain, "models")
-    all_tag_model_urls.extend(models_urls)
-    
-    # Remove duplicates
-    unique_urls = list(dict.fromkeys(all_tag_model_urls))
-    
-    log_with_timestamp(f"🎯 Found {len(unique_urls)} total tag/model URLs")
-    return unique_urls
+    try:
+        response = requests.get(sitemap_index_url, timeout=10)
+        soup = BeautifulSoup(response.content, 'xml')
+        
+        # Find sitemap URLs (looking for content sitemaps)
+        sitemap_urls = []
+        for sitemap in soup.find_all('sitemap'):
+            loc = sitemap.find('loc')
+            if loc and 'content' in loc.text:
+                sitemap_urls.append(loc.text)
+        
+        log_with_timestamp(f"Found {len(sitemap_urls)} content sitemaps")
+        
+        # Process each sitemap
+        for sitemap_url in sitemap_urls:
+            log_with_timestamp(f"Processing sitemap: {sitemap_url}")
+            try:
+                response = requests.get(sitemap_url, timeout=10)
+                soup = BeautifulSoup(response.content, 'xml')
+                
+                for url in soup.find_all('url'):
+                    loc = url.find('loc')
+                    if loc and '/updates/' in loc.text:
+                        video_urls.add(loc.text)
+                        
+            except Exception as e:
+                log_with_timestamp(f"Error processing sitemap {sitemap_url}: {e}")
+        
+        log_with_timestamp(f"Found {len(video_urls)} video URLs from sitemap")
+        return list(video_urls)
+        
+    except Exception as e:
+        log_with_timestamp(f"Error getting sitemap: {e}")
+        return []
+
+def extract_video_metadata(driver, video_url):
+    """Extract comprehensive metadata from a video page."""
+    try:
+        log_with_timestamp(f"   📄 Extracting metadata from: {video_url}")
+        driver.get(video_url)
+        time.sleep(3)
+        
+        metadata = {
+            'url': video_url,
+            'title': '',
+            'description': '',
+            'thumbnail': '',
+            'models': [],
+            'tags': [],
+            'duration': '',
+            'photo_count': '',
+            'release_date': '',
+            'related_videos': []
+        }
+        
+        # Extract title
+        try:
+            title_elem = driver.find_element(By.TAG_NAME, "h1")
+            metadata['title'] = title_elem.text.strip()
+        except:
+            pass
+        
+        # Extract thumbnail from meta tag
+        try:
+            thumbnail_elem = driver.find_element(By.CSS_SELECTOR, 'meta[property="og:image"]')
+            metadata['thumbnail'] = thumbnail_elem.get_attribute('content')
+        except:
+            # Fallback to poster in iframe
+            try:
+                iframe = driver.find_element(By.CSS_SELECTOR, 'iframe.cloudflare-player')
+                src = iframe.get_attribute('src')
+                if 'poster=' in src:
+                    metadata['thumbnail'] = src.split('poster=')[1].split('&')[0]
+            except:
+                pass
+        
+        # Extract description
+        try:
+            desc_elem = driver.find_element(By.CSS_SELECTOR, '.videoDescription p')
+            metadata['description'] = desc_elem.text.strip()
+        except:
+            pass
+        
+        # Extract models
+        try:
+            model_links = driver.find_elements(By.CSS_SELECTOR, '.models a')
+            for link in model_links:
+                model_name = link.text.strip()
+                if model_name and model_name != "":
+                    metadata['models'].append(model_name)
+        except:
+            pass
+        
+        # Extract tags
+        try:
+            tag_links = driver.find_elements(By.CSS_SELECTOR, '.tags a')
+            for link in tag_links:
+                tag_name = link.text.strip()
+                if tag_name and tag_name != "":
+                    metadata['tags'].append(tag_name)
+        except:
+            pass
+        
+        # Extract content info (duration, photo count, date)
+        try:
+            content_info = driver.find_elements(By.CSS_SELECTOR, '.contentInfo li')
+            for info in content_info:
+                text = info.text.strip()
+                
+                # Duration (contains colon and not a date)
+                if ':' in text and not any(month in text for month in ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                                                                       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']):
+                    metadata['duration'] = text
+                
+                # Photo count (pure digits)
+                elif text.isdigit():
+                    metadata['photo_count'] = text
+                
+                # Release date (contains month names)
+                elif any(month in text for month in ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                                                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']):
+                    metadata['release_date'] = text
+        except:
+            pass
+        
+        # Extract related videos
+        try:
+            related_links = driver.find_elements(By.CSS_SELECTOR, '.relatedVideos .videoBlock h3 a')
+            for link in related_links:
+                related_title = link.text.strip()
+                related_url = link.get_attribute('href')
+                if related_title and related_url:
+                    metadata['related_videos'].append({
+                        'title': related_title,
+                        'url': related_url
+                    })
+        except:
+            pass
+        
+        log_with_timestamp(f"   ✅ Extracted: '{metadata['title']}' - {len(metadata['tags'])} tags, {len(metadata['models'])} models")
+        return metadata
+        
+    except Exception as e:
+        log_with_timestamp(f"   ❌ Error extracting metadata from {video_url}: {e}")
+        return None
 
 def crawl_category_pages(driver, domain, category):
     """Crawl either 'tags' or 'models' category pages"""
