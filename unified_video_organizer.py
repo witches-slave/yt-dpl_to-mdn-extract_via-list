@@ -111,6 +111,17 @@ def get_user_inputs():
         print(f"❌ ERROR: Could not read list_video.txt: {e}")
         sys.exit(1)
     
+    # Parse video entries for detailed count
+    try:
+        video_entries = parse_video_list()
+        if not video_entries:
+            print("❌ ERROR: list_video.txt is empty or has no valid entries.")
+            print("💡 SOLUTION: Run 'python3 sitemap_video_parser.py' to populate the video list.")
+            sys.exit(1)
+    except Exception as e:
+        print(f"❌ ERROR: Could not parse list_video.txt: {e}")
+        sys.exit(1)
+    
     # Get domain
     domain = input("Enter the domain (e.g., https://shinybound.com): ").strip()
     if not domain:
@@ -187,12 +198,6 @@ def parse_video_list(filename='list_video.txt'):
         raise Exception(f"Error reading {filename}: {e}")
     
     return video_entries
-    print(f"Source folder: {video_folder}")
-    print(f"Tags folder: {organization_folder}")
-    print(f"Video URLs: {len(lines)} videos from list_video.txt")
-    print("="*60 + "\n")
-    
-    return domain, video_folder, organization_folder
 
 def setup_headless_browser():
     """Setup headless Chrome browser"""
