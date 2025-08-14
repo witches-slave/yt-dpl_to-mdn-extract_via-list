@@ -524,24 +524,64 @@ def extract_models_from_page(driver):
         model_blocks = driver.find_elements(By.CSS_SELECTOR, '.allModels .modelBlock')
         log_with_timestamp(f"        🔍 Found {len(model_blocks)} model blocks on this page")
         
-        for block in model_blocks:
+        for i, block in enumerate(model_blocks, 1):
             try:
-                # Extract model name from h3 > a
-                name_elem = block.find_element(By.CSS_SELECTOR, 'h3 a')
-                model_name = name_elem.text.strip()
+                # Extract model name from h3 > a with multiple fallback methods
+                model_name = None
                 
-                # Extract image URL from .modelPic > a > img (corrected selector)
-                img_elem = block.find_element(By.CSS_SELECTOR, '.modelPic a img')
-                img_url = img_elem.get_attribute('src')
+                # Method 1: Try h3 a selector
+                try:
+                    name_elem = block.find_element(By.CSS_SELECTOR, 'h3 a')
+                    model_name = name_elem.text.strip()
+                    if not model_name:
+                        # Try getting text via JavaScript if text property is empty
+                        model_name = driver.execute_script("return arguments[0].textContent;", name_elem).strip()
+                except Exception as e:
+                    log_with_timestamp(f"        ⚠️  Method 1 failed for block {i}: {e}")
                 
+                # Method 2: Try just h3 if the first method failed
+                if not model_name:
+                    try:
+                        h3_elem = block.find_element(By.CSS_SELECTOR, 'h3')
+                        model_name = h3_elem.text.strip()
+                        if not model_name:
+                            model_name = driver.execute_script("return arguments[0].textContent;", h3_elem).strip()
+                    except Exception as e:
+                        log_with_timestamp(f"        ⚠️  Method 2 failed for block {i}: {e}")
+                
+                # Method 3: Try extracting from the image alt attribute as fallback
+                if not model_name:
+                    try:
+                        img_elem = block.find_element(By.CSS_SELECTOR, '.modelPic a img')
+                        model_name = img_elem.get_attribute('alt').strip()
+                        log_with_timestamp(f"        ℹ️  Using alt text for block {i}: {model_name}")
+                    except Exception as e:
+                        log_with_timestamp(f"        ⚠️  Method 3 failed for block {i}: {e}")
+                
+                # Extract image URL from .modelPic > a > img
+                img_url = None
+                try:
+                    img_elem = block.find_element(By.CSS_SELECTOR, '.modelPic a img')
+                    img_url = img_elem.get_attribute('src')
+                except Exception as e:
+                    log_with_timestamp(f"        ❌ Failed to extract image for block {i}: {e}")
+                
+                # Only add if we have both name and image
                 if model_name and img_url:
                     models[model_name] = img_url
-                    log_with_timestamp(f"        ✅ Found model: {model_name} -> {img_url}")
+                    log_with_timestamp(f"        ✅ Block {i}: {model_name} -> {img_url}")
                 else:
-                    log_with_timestamp(f"        ⚠️  Missing data for model block: name='{model_name}', img='{img_url}'")
+                    log_with_timestamp(f"        ❌ Block {i} missing data: name='{model_name}', img='{img_url}'")
+                    
+                    # Debug: print the HTML of this block for troubleshooting
+                    try:
+                        block_html = block.get_attribute('outerHTML')[:300]  # First 300 chars
+                        log_with_timestamp(f"             HTML: {block_html}...")
+                    except:
+                        pass
                     
             except Exception as e:
-                log_with_timestamp(f"        ❌ Error extracting model from block: {e}")
+                log_with_timestamp(f"        ❌ Error extracting model from block {i}: {e}")
                 continue  # Skip this model block if extraction fails
     
     except Exception as e:
