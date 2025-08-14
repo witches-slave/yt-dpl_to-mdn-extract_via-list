@@ -389,6 +389,146 @@ def extract_video_urls_from_page(driver, domain):
     unique_urls = list(set(video_urls))
     return unique_urls
 
+def get_all_models_with_images(driver, domain):
+    """Fetch all models and their image URLs from the models overview page(s)"""
+    models_cache = {}
+    
+    try:
+        # Start with the main models page
+        models_url = f"{domain}/models"
+        log_with_timestamp(f"🎭 Fetching all models from: {models_url}")
+        
+        driver.get(models_url)
+        
+        # Wait for page to load
+        try:
+            WebDriverWait(driver, 10).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            # Wait for models to load
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, '.allModels .modelBlock'))
+            )
+        except:
+            log_with_timestamp("    ⚠️  Timeout waiting for models page to load")
+        
+        time.sleep(3)  # Additional wait for content to render
+        
+        # Get pagination URLs for models pages
+        models_pagination_urls = get_models_pagination_urls(driver, models_url)
+        log_with_timestamp(f"    📄 Found {len(models_pagination_urls)} model pages to process")
+        
+        # Process each models page
+        for page_num, page_url in enumerate(models_pagination_urls, 1):
+            if page_num > 1:  # Skip first page as we're already on it
+                log_with_timestamp(f"    📄 Loading models page {page_num}/{len(models_pagination_urls)}")
+                driver.get(page_url)
+                
+                # Wait for page to load
+                try:
+                    WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, '.allModels .modelBlock'))
+                    )
+                except:
+                    log_with_timestamp(f"        ⚠️  Timeout waiting for page {page_num} to load")
+                
+                time.sleep(2)  # Brief wait for content
+            
+            # Extract models from current page
+            page_models = extract_models_from_page(driver)
+            models_cache.update(page_models)
+            log_with_timestamp(f"    ✅ Page {page_num}: Found {len(page_models)} models")
+        
+        log_with_timestamp(f"🎭 Model cache complete: {len(models_cache)} total models cached")
+        return models_cache
+        
+    except Exception as e:
+        log_with_timestamp(f"    ❌ Error fetching models: {e}")
+        return models_cache
+
+def get_models_pagination_urls(driver, base_url):
+    """Get all pagination URLs for models pages"""
+    pagination_urls = [base_url]  # Always include the first page
+    
+    try:
+        # Find pagination div
+        pagination_div = driver.find_element(By.CSS_SELECTOR, ".pagination")
+        if pagination_div:
+            # Find all pagination links
+            pagination_links = pagination_div.find_elements(By.TAG_NAME, "a")
+            
+            max_page = 1
+            
+            for link in pagination_links:
+                try:
+                    href = link.get_attribute("href")
+                    text = link.text.strip()
+                    
+                    if href and href != "#" and "page=" in href:
+                        # Extract page number from URL
+                        try:
+                            page_num = int(href.split("page=")[1].split("&")[0])
+                            if page_num > max_page:
+                                max_page = page_num
+                        except:
+                            pass
+                    
+                    # Also check link text for page numbers
+                    if text.isdigit():
+                        try:
+                            text_page_num = int(text)
+                            if text_page_num > max_page:
+                                max_page = text_page_num
+                        except:
+                            pass
+                            
+                except Exception as e:
+                    continue
+            
+            # Generate URLs for all pages
+            if max_page > 1:
+                for page_num in range(1, max_page + 1):
+                    if page_num == 1:
+                        continue  # Already added
+                    else:
+                        page_url = f"{base_url}?page={page_num}"
+                        pagination_urls.append(page_url)
+        
+        return pagination_urls
+        
+    except Exception as e:
+        log_with_timestamp(f"    ⚠️  Error finding models pagination: {e}")
+        return pagination_urls
+
+def extract_models_from_page(driver):
+    """Extract model names and image URLs from current models page"""
+    models = {}
+    
+    try:
+        # Find all model blocks
+        model_blocks = driver.find_elements(By.CSS_SELECTOR, '.allModels .modelBlock')
+        
+        for block in model_blocks:
+            try:
+                # Extract model name from h3 > a
+                name_elem = block.find_element(By.CSS_SELECTOR, 'h3 a')
+                model_name = name_elem.text.strip()
+                
+                # Extract image URL from .modelPic img
+                img_elem = block.find_element(By.CSS_SELECTOR, '.modelPic img')
+                img_url = img_elem.get_attribute('src')
+                
+                if model_name and img_url:
+                    models[model_name] = img_url
+                    
+            except Exception as e:
+                continue  # Skip this model block if extraction fails
+    
+    except Exception as e:
+        log_with_timestamp(f"        ❌ Error extracting models from page: {e}")
+    
+    return models
+
 def process_videos_from_list(domain, video_folder, organization_folder):
     """Process videos from list_video.txt file"""
     log_with_timestamp("🕷️  Starting video processing from list_video.txt")
@@ -413,9 +553,12 @@ def process_videos_from_list(domain, video_folder, organization_folder):
     
     processed_videos = []
     missing_videos = []
-    processed_models = {}  # Cache for model images to avoid re-downloading
     
     try:
+        # FIRST: Fetch all models and their images once
+        log_with_timestamp("🎭 Pre-loading all models and images...")
+        models_cache = get_all_models_with_images(driver, domain)
+        
         # Process each video entry
         for i, entry in enumerate(video_entries, 1):
             video_url = entry['url']
@@ -450,7 +593,7 @@ def process_videos_from_list(domain, video_folder, organization_folder):
                     log_with_timestamp(f"        ✅ Found local file: {os.path.basename(video_file)}")
                     processed_videos.append(metadata)
                     # Organize this video with model cache
-                    organize_single_video(video_file, metadata, domain, driver, processed_models, organization_folder)
+                    organize_single_video(video_file, metadata, domain, driver, models_cache, organization_folder)
                 else:
                     log_with_timestamp(f"        ❌ Local file not found")
                     missing_videos.append({
@@ -474,14 +617,14 @@ def process_videos_from_list(domain, video_folder, organization_folder):
         log_with_timestamp(f"\n🎯 Video processing complete!")
         log_with_timestamp(f"   Processed: {len(processed_videos)} videos")
         log_with_timestamp(f"   Missing: {len(missing_videos)} videos")
-        log_with_timestamp(f"   Models processed: {len(processed_models)} unique models")
+        log_with_timestamp(f"   Models cached: {len(models_cache)} unique models")
         
         return processed_videos, missing_videos
         
     finally:
         driver.quit()
 
-def organize_single_video(video_file, metadata, domain, driver=None, processed_models=None, organization_folder=None):
+def organize_single_video(video_file, metadata, domain, driver=None, models_cache=None, organization_folder=None):
     """Organize a single video with its metadata"""
     try:
         video_title = metadata.get('title', '')
@@ -501,32 +644,26 @@ def organize_single_video(video_file, metadata, domain, driver=None, processed_m
             clean_model = re.sub(r'[^\w\s-]', '', model).strip()
             model_dir = os.path.join(organization_folder, f"model {clean_model}")
             
-            # Use model cache to avoid re-downloading
-            if processed_models is None:
-                processed_models = {}
-                
-            if model in processed_models:
-                model_image_url = processed_models[model]
-                log_with_timestamp(f"    ✅ Using cached model image")
-            elif driver:
-                model_image_url = extract_model_image_url(driver, model, domain)
-                processed_models[model] = model_image_url
+            # Use model cache instead of fetching individual images
+            if models_cache and model in models_cache:
+                model_image_url = models_cache[model]
+                log_with_timestamp(f"    ✅ Using cached model image for {model}")
                 
                 # Download model image as folder.jpg
-                if model_image_url:
-                    folder_jpg_path = os.path.join(model_dir, 'folder.jpg')
-                    if not os.path.exists(folder_jpg_path):
-                        if download_image(model_image_url, folder_jpg_path):
-                            log_with_timestamp(f"    ✅ Downloaded model image")
-                        else:
-                            log_with_timestamp(f"    ⚠️  Failed to download model image")
+                folder_jpg_path = os.path.join(model_dir, 'folder.jpg')
+                if not os.path.exists(folder_jpg_path):
+                    if download_image(model_image_url, folder_jpg_path):
+                        log_with_timestamp(f"    ✅ Downloaded model image")
+                    else:
+                        log_with_timestamp(f"    ⚠️  Failed to download model image")
+                else:
+                    log_with_timestamp(f"    ℹ️  Model image already exists")
                 
                 # Create actress NFO file
                 if not create_actress_nfo(model_dir, model, model_image_url):
                     log_with_timestamp(f"    ⚠️  Failed to create actress NFO")
-                
-                # Small delay to be respectful
-                time.sleep(1)
+            else:
+                log_with_timestamp(f"    ⚠️  Model '{model}' not found in cache")
             
             # Create model symlink
             model_link = os.path.join(model_dir, os.path.basename(video_file))
