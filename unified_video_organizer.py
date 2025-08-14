@@ -146,74 +146,72 @@ def get_user_inputs():
     organization_folder = os.path.abspath(organization_folder)
     
     def get_user_inputs():
-    """Get domain and video folder from user"""
-    print("=" * 60)
-    print("UNIFIED VIDEO ORGANIZER")
-    print("=" * 60)
-    print()
-    
-    # Check if list_video.txt exists
-    if not os.path.exists("list_video.txt"):
-        print("❌ ERROR: list_video.txt not found in the current directory.")
-        print("💡 SOLUTION: Run 'python3 sitemap_video_parser.py' first to generate the video list.")
-        print("   This script extracts video URLs from the sitemap and creates list_video.txt")
-        sys.exit(1)
-    
-    # Check if list_video.txt is empty and parse it
-    try:
-        video_entries = parse_video_list()
-        if not video_entries:
-            print("❌ ERROR: list_video.txt is empty or has no valid entries.")
-            print("💡 SOLUTION: Run 'python3 sitemap_video_parser.py' to populate the video list.")
+        """Get domain and video folder from user"""
+        print("=" * 60)
+        print("UNIFIED VIDEO ORGANIZER")
+        print("=" * 60)
+        print()
+        
+        # Check if list_video.txt exists
+        if not os.path.exists("list_video.txt"):
+            print("❌ ERROR: list_video.txt not found in the current directory.")
+            print("💡 SOLUTION: Run 'python3 sitemap_video_parser.py' first to generate the video list.")
+            print("   This script extracts video URLs from the sitemap and creates list_video.txt")
             sys.exit(1)
-        log_with_timestamp(f"✅ Found {len(video_entries)} video entries in list_video.txt")
-    except Exception as e:
-        print(f"❌ ERROR: Could not read list_video.txt: {e}")
-        sys.exit(1)
-    
-    # Get domain
-    domain = input("Enter the domain (e.g., https://shinybound.com): ").strip()
-    if not domain:
-        print("Error: Domain cannot be empty")
-        sys.exit(1)
-    
-    # Ensure domain has proper format
-    if not domain.startswith(('http://', 'https://')):
-        domain = 'https://' + domain
-    domain = domain.rstrip('/')
-    
-    # Get source folder path
-    video_folder = input("Enter the source folder path (where your videos are stored): ").strip()
-    if not video_folder:
-        print("Error: Video folder cannot be empty")
-        sys.exit(1)
-    
-    if not os.path.exists(video_folder):
-        print(f"Error: Video folder does not exist: {video_folder}")
-        sys.exit(1)
-    
-    # Get target tags folder (where symlinks will be created)
-    organization_folder = input("Enter the tags folder path (where symlinks will be created): ").strip()
-    if not organization_folder:
-        print("Error: Tags folder cannot be empty")
-        sys.exit(1)
-    
-    # Create tags folder if it doesn't exist
-    os.makedirs(organization_folder, exist_ok=True)
-    
-    # Expand paths
-    video_folder = os.path.abspath(video_folder)
-    organization_folder = os.path.abspath(organization_folder)
-    
-    print(f"
-Domain: {domain}")
-    print(f"Source folder: {video_folder}")
-    print(f"Tags folder: {organization_folder}")
-    print(f"Video entries: {len(video_entries)} videos from list_video.txt")
-    print("="*60 + "
-")
-    
-    return domain, video_folder, organization_folder
+        
+        # Check if list_video.txt is empty and parse it
+        try:
+            video_entries = parse_video_list()
+            if not video_entries:
+                print("❌ ERROR: list_video.txt is empty or has no valid entries.")
+                print("💡 SOLUTION: Run 'python3 sitemap_video_parser.py' to populate the video list.")
+                sys.exit(1)
+            log_with_timestamp(f"✅ Found {len(video_entries)} video entries in list_video.txt")
+        except Exception as e:
+            print(f"❌ ERROR: Could not read list_video.txt: {e}")
+            sys.exit(1)
+        
+        # Get domain
+        domain = input("Enter the domain (e.g., https://shinybound.com): ").strip()
+        if not domain:
+            print("Error: Domain cannot be empty")
+            sys.exit(1)
+        
+        # Ensure domain has proper format
+        if not domain.startswith(('http://', 'https://')):
+            domain = 'https://' + domain
+        domain = domain.rstrip('/')
+        
+        # Get source folder path
+        video_folder = input("Enter the source folder path (where your videos are stored): ").strip()
+        if not video_folder:
+            print("Error: Video folder cannot be empty")
+            sys.exit(1)
+        
+        if not os.path.exists(video_folder):
+            print(f"Error: Video folder does not exist: {video_folder}")
+            sys.exit(1)
+        
+        # Get target tags folder (where symlinks will be created)
+        organization_folder = input("Enter the tags folder path (where symlinks will be created): ").strip()
+        if not organization_folder:
+            print("Error: Tags folder cannot be empty")
+            sys.exit(1)
+        
+        # Create tags folder if it doesn't exist
+        os.makedirs(organization_folder, exist_ok=True)
+        
+        # Expand paths
+        video_folder = os.path.abspath(video_folder)
+        organization_folder = os.path.abspath(organization_folder)
+        
+        print(f"\nDomain: {domain}")
+        print(f"Source folder: {video_folder}")
+        print(f"Tags folder: {organization_folder}")
+        print(f"Video entries: {len(video_entries)} videos from list_video.txt")
+        print("="*60 + "\n")
+        
+        return domain, video_folder, organization_folder
 
 def parse_video_list(filename='list_video.txt'):
     """Parse list_video.txt file that contains URL|TITLE format"""
