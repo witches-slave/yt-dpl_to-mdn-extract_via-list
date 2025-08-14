@@ -405,12 +405,15 @@ def get_all_models_with_images(driver, domain):
             WebDriverWait(driver, 10).until(
                 lambda d: d.execute_script("return document.readyState") == "complete"
             )
+            log_with_timestamp("    ⏳ Page loaded, waiting for models...")
+            
             # Wait for models to load
             WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, '.allModels .modelBlock'))
             )
-        except:
-            log_with_timestamp("    ⚠️  Timeout waiting for models page to load")
+            log_with_timestamp("    ✅ Model blocks detected")
+        except Exception as e:
+            log_with_timestamp(f"    ⚠️  Timeout waiting for models page to load: {e}")
         
         time.sleep(3)  # Additional wait for content to render
         
@@ -421,7 +424,7 @@ def get_all_models_with_images(driver, domain):
         # Process each models page
         for page_num, page_url in enumerate(models_pagination_urls, 1):
             if page_num > 1:  # Skip first page as we're already on it
-                log_with_timestamp(f"    📄 Loading models page {page_num}/{len(models_pagination_urls)}")
+                log_with_timestamp(f"    📄 Loading models page {page_num}/{len(models_pagination_urls)}: {page_url}")
                 driver.get(page_url)
                 
                 # Wait for page to load
@@ -429,15 +432,17 @@ def get_all_models_with_images(driver, domain):
                     WebDriverWait(driver, 10).until(
                         EC.presence_of_element_located((By.CSS_SELECTOR, '.allModels .modelBlock'))
                     )
-                except:
-                    log_with_timestamp(f"        ⚠️  Timeout waiting for page {page_num} to load")
+                except Exception as e:
+                    log_with_timestamp(f"        ⚠️  Timeout waiting for page {page_num} to load: {e}")
                 
                 time.sleep(2)  # Brief wait for content
+            else:
+                log_with_timestamp(f"    📄 Processing models page {page_num}/{len(models_pagination_urls)}: {page_url}")
             
             # Extract models from current page
             page_models = extract_models_from_page(driver)
             models_cache.update(page_models)
-            log_with_timestamp(f"    ✅ Page {page_num}: Found {len(page_models)} models")
+            log_with_timestamp(f"    ✅ Page {page_num}: Found {len(page_models)} models (total: {len(models_cache)})")
         
         log_with_timestamp(f"🎭 Model cache complete: {len(models_cache)} total models cached")
         return models_cache
@@ -454,8 +459,11 @@ def get_models_pagination_urls(driver, base_url):
         # Find pagination div
         pagination_div = driver.find_element(By.CSS_SELECTOR, ".pagination")
         if pagination_div:
+            log_with_timestamp("    🔍 Found pagination section")
+            
             # Find all pagination links
             pagination_links = pagination_div.find_elements(By.TAG_NAME, "a")
+            log_with_timestamp(f"    🔍 Found {len(pagination_links)} pagination links")
             
             max_page = 1
             
@@ -470,7 +478,8 @@ def get_models_pagination_urls(driver, base_url):
                             page_num = int(href.split("page=")[1].split("&")[0])
                             if page_num > max_page:
                                 max_page = page_num
-                        except:
+                                log_with_timestamp(f"        📄 Found page {page_num} in URL: {href}")
+                        except ValueError:
                             pass
                     
                     # Also check link text for page numbers
@@ -479,7 +488,8 @@ def get_models_pagination_urls(driver, base_url):
                             text_page_num = int(text)
                             if text_page_num > max_page:
                                 max_page = text_page_num
-                        except:
+                                log_with_timestamp(f"        📄 Found page {text_page_num} in text: '{text}'")
+                        except ValueError:
                             pass
                             
                 except Exception as e:
@@ -487,12 +497,17 @@ def get_models_pagination_urls(driver, base_url):
             
             # Generate URLs for all pages
             if max_page > 1:
+                log_with_timestamp(f"    📄 Generating URLs for pages 1-{max_page}")
                 for page_num in range(1, max_page + 1):
                     if page_num == 1:
                         continue  # Already added
                     else:
                         page_url = f"{base_url}?page={page_num}"
                         pagination_urls.append(page_url)
+            else:
+                log_with_timestamp("    📄 Only one page found")
+        else:
+            log_with_timestamp("    ⚠️  No pagination section found")
         
         return pagination_urls
         
@@ -507,6 +522,7 @@ def extract_models_from_page(driver):
     try:
         # Find all model blocks
         model_blocks = driver.find_elements(By.CSS_SELECTOR, '.allModels .modelBlock')
+        log_with_timestamp(f"        🔍 Found {len(model_blocks)} model blocks on this page")
         
         for block in model_blocks:
             try:
@@ -514,18 +530,22 @@ def extract_models_from_page(driver):
                 name_elem = block.find_element(By.CSS_SELECTOR, 'h3 a')
                 model_name = name_elem.text.strip()
                 
-                # Extract image URL from .modelPic img
-                img_elem = block.find_element(By.CSS_SELECTOR, '.modelPic img')
+                # Extract image URL from .modelPic > a > img (corrected selector)
+                img_elem = block.find_element(By.CSS_SELECTOR, '.modelPic a img')
                 img_url = img_elem.get_attribute('src')
                 
                 if model_name and img_url:
                     models[model_name] = img_url
+                    log_with_timestamp(f"        ✅ Found model: {model_name} -> {img_url}")
+                else:
+                    log_with_timestamp(f"        ⚠️  Missing data for model block: name='{model_name}', img='{img_url}'")
                     
             except Exception as e:
+                log_with_timestamp(f"        ❌ Error extracting model from block: {e}")
                 continue  # Skip this model block if extraction fails
     
     except Exception as e:
-        log_with_timestamp(f"        ❌ Error extracting models from page: {e}")
+        log_with_timestamp(f"        ❌ Error finding model blocks: {e}")
     
     return models
 

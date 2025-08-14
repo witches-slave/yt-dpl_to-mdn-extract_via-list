@@ -2,3 +2,4 @@ videos/
 venv/
 tags/
 .download_config.txt
+__pycache__/
