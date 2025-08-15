@@ -12,6 +12,7 @@ import re
 import time
 from urllib.parse import urlparse, urljoin
 from seleniumwire import webdriver
+from video_utils import get_consistent_filename, create_url_title_from_url
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -314,11 +315,7 @@ def extract_video_data_from_page(driver, domain):
                                         
                                     # Clean the title if we found one
                                     if title:
-                                        title = title.strip()
-                                        # Remove newlines and extra spaces
-                                        title = re.sub(r'\s+', ' ', title)
-                                        # Remove invalid filename characters
-                                        title = re.sub(r'[<>:"/\\|?*]', '', title)
+                                        title = get_consistent_filename(title)
                                         
                                 except Exception:
                                     title = None
@@ -341,18 +338,7 @@ def extract_video_data_from_page(driver, domain):
 
 def create_url_title(url):
     """Create a title from URL when duplicates are detected"""
-    try:
-        # Extract the part after /updates/
-        if "/updates/" in url:
-            url_part = url.split("/updates/")[1]
-            # Remove any trailing slashes and parameters
-            url_part = url_part.split('?')[0].rstrip('/')
-            # Convert hyphens to spaces and make uppercase
-            url_title = url_part.replace('-', ' ').upper()
-            return url_title
-    except Exception:
-        pass
-    return None
+    return create_url_title_from_url(url)
 
 def detect_and_handle_duplicates(video_data):
     """Detect duplicate titles and assign URL-based titles where needed"""

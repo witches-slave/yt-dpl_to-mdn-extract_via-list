@@ -23,6 +23,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from datetime import datetime
+from video_utils import get_consistent_filename, normalize_title_for_matching
 import re
 import glob
 
@@ -1151,9 +1152,8 @@ def find_video_file(video_folder, video_title):
     if not video_title:
         return None
         
-    # Clean title for filename matching (remove special characters, normalize spaces)
-    clean_title = re.sub(r'[^\w\s-]', '', video_title).strip()
-    clean_title = re.sub(r'\s+', ' ', clean_title)
+    # Use consistent filename processing
+    clean_title = get_consistent_filename(video_title)
     
     # Common video extensions
     video_extensions = ['*.mp4', '*.mkv', '*.avi', '*.mov', '*.wmv', '*.flv', '*.webm']
@@ -1164,9 +1164,8 @@ def find_video_file(video_folder, video_title):
             video_filename = os.path.basename(video_file)
             video_name = os.path.splitext(video_filename)[0]
             
-            # Clean filename the same way as title
-            clean_filename = re.sub(r'[^\w\s-]', '', video_name).strip()
-            clean_filename = re.sub(r'\s+', ' ', clean_filename)
+            # Apply same consistent filename processing to existing files
+            clean_filename = get_consistent_filename(video_name)
             
             # Case-insensitive exact match
             if clean_title.lower() == clean_filename.lower():
@@ -1296,11 +1295,14 @@ def create_actress_nfo(model_dir, model_name, model_image_url):
     try:
         actress_nfo_path = os.path.join(model_dir, "actress.nfo")
         
+        # Use local folder.jpg instead of remote URL for better performance
+        local_image_path = "folder.jpg"
+        
         nfo_content = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <person>
     <name>{model_name}</name>
     <type>Actor</type>
-    <thumb>{model_image_url or ''}</thumb>
+    <thumb>{local_image_path}</thumb>
 </person>"""
         
         with open(actress_nfo_path, 'w', encoding='utf-8') as f:
@@ -1318,35 +1320,42 @@ def create_nfo_file(video_path, metadata, model_image_url=None):
     try:
         nfo_path = os.path.splitext(video_path)[0] + '.nfo'
         
-        # Build NFO content
+        # Build NFO content (use consistent filename for title)
+        safe_title = get_consistent_filename(metadata.get('title', ''))
         nfo_content = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <movie>
-    <title>{metadata.get('title', '')}</title>
+    <title>{safe_title}</title>
     <plot>{metadata.get('description', '')}</plot>
     <studio>{urlparse(metadata.get('url', '')).netloc}</studio>
     <premiered>{metadata.get('date', '')}</premiered>
     <runtime>{metadata.get('duration', '')}</runtime>
     <thumb>{metadata.get('thumbnail', '')}</thumb>
+    <year>{metadata.get('date', '').split(' ')[-1] if metadata.get('date') else ''}</year>
+    <dateadded>{datetime.now().isoformat()}</dateadded>
 """
         
         # Add model as actor with image
         if metadata.get('model'):
-            if model_image_url:
-                nfo_content += f"""    <actor>
+            # Use relative path to local model image instead of remote URL
+            local_model_image = f"../model {metadata['model']}/folder.jpg"
+            nfo_content += f"""    <actor>
         <name>{metadata['model']}</name>
-        <thumb>{model_image_url}</thumb>
+        <thumb>{local_model_image}</thumb>
     </actor>
 """
-            else:
-                nfo_content += f"    <actor>\n        <name>{metadata['model']}</name>\n    </actor>\n"
         
         # Add tags as genres
         for tag in metadata.get('tags', []):
             nfo_content += f"    <genre>{tag}</genre>\n"
         
-        # Add related videos as similar movies
+        # Add related videos as similar movies (for Jellyfin recommendations)
         for related in metadata.get('related_videos', []):
             nfo_content += f"    <similar>{related['title']}</similar>\n"
+        
+        # Add additional Jellyfin-supported fields
+        if metadata.get('url'):
+            # Add source URL as a tag for reference
+            nfo_content += f"    <tag>Source: {metadata['url']}</tag>\n"
         
         nfo_content += "</movie>"
         

@@ -11,6 +11,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
+from video_utils import get_consistent_filename, create_url_title_from_url, normalize_title_for_matching
 
 def log_with_timestamp(message):
     """Print message with timestamp"""
@@ -894,16 +895,18 @@ def run_yt_dlp(manifest_url, cookie, video_title=None, domain=None, output_folde
     
     # Add custom filename and output folder if available
     if video_title and output_folder:
-        # Use the video title as the output filename in the specified folder
-        output_template = os.path.join(output_folder, f"{video_title}.%(ext)s")
+        # Use consistent filename truncation to avoid long filename errors
+        safe_title = get_consistent_filename(video_title)
+        output_template = os.path.join(output_folder, f"{safe_title}.%(ext)s")
         cmd.extend(["-o", output_template])
-        log_with_timestamp(f"Using custom filename: {video_title}")
+        log_with_timestamp(f"Using custom filename: {safe_title}")
         log_with_timestamp(f"Output folder: {output_folder}")
     elif video_title:
-        # Use the video title as the output filename in current directory
-        output_template = f"{video_title}.%(ext)s"
+        # Use consistent filename truncation to avoid long filename errors
+        safe_title = get_consistent_filename(video_title)
+        output_template = f"{safe_title}.%(ext)s"
         cmd.extend(["-o", output_template])
-        log_with_timestamp(f"Using custom filename: {video_title}")
+        log_with_timestamp(f"Using custom filename: {safe_title}")
     elif output_folder:
         # Use default filename in specified folder
         output_template = os.path.join(output_folder, "%(title)s.%(ext)s")
@@ -959,11 +962,14 @@ def check_file_exists(video_title, output_folder=None):
     if not video_title:
         return False
     
+    # Use consistent filename truncation for checking
+    safe_title = get_consistent_filename(video_title)
+    
     # Common video file extensions
     video_extensions = ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v']
     
     # Normalize video title for comparison (lowercase)
-    video_title_lower = video_title.lower()
+    safe_title_lower = safe_title.lower()
     
     # Determine which directory to check
     check_dir = output_folder if output_folder else "."
@@ -979,7 +985,7 @@ def check_file_exists(video_title, output_folder=None):
                     if file.lower().endswith(ext.lower()):
                         # Extract filename without extension and compare case-insensitively
                         file_title = os.path.splitext(file)[0].lower()
-                        if file_title == video_title_lower:
+                        if file_title == safe_title_lower:
                             log_with_timestamp(f"File already exists: {file_path}")
                             return True
     except OSError:
@@ -1112,31 +1118,20 @@ def get_final_title_for_download(entry, duplicate_titles):
         title = entry['title']
         if title and title.isupper() and ' ' in title:
             log_with_timestamp(f"  📝 Using URL-based title for duplicate: {title}")
-            return title
+            return get_consistent_filename(title)
         else:
             # Fallback: create URL-based title from URL
             url_title = create_url_title_from_url(entry['url'])
             log_with_timestamp(f"  📝 Creating URL-based title from URL: {url_title}")
-            return url_title
+            return get_consistent_filename(url_title)
     else:
         # Normal title
-        return entry['title']
-
-def create_url_title_from_url(url):
-    """Create a title from URL (same logic as sitemap parser)"""
-    try:
-        if "/updates/" in url:
-            url_part = url.split("/updates/")[1]
-            url_part = url_part.split('?')[0].rstrip('/')
-            url_title = url_part.replace('-', ' ').upper()
-            return url_title
-    except Exception:
-        pass
-    return "UNKNOWN VIDEO"
+        return get_consistent_filename(entry['title'] or "UNKNOWN_VIDEO")
 
 def is_manifest_url(url):
     """Check if URL is already a manifest URL"""
     return url and ('/manifest/video.mpd' in url or url.endswith('.mpd'))
+    
 def main():
     # Check if we're in dry-run mode
     dry_run = "--dry-run" in sys.argv
